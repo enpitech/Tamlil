@@ -169,7 +169,7 @@ pub fn builtin_models() -> Vec<ModelDef> {
         // serves every language. Official QAT q4_0 files; chat template from the GGUF.
         ModelDef {
             name: "gemma4:12b".to_string(),
-            display_name: "Gemma 4 12B (Best quality)".to_string(),
+            display_name: "Gemma 4 12B (Best quality, 16 GB RAM)".to_string(),
             gguf_file: "gemma-4-12b-it-qat-q4_0.gguf".to_string(),
             template: AUTO_TEMPLATE.to_string(),
             download_url: "https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-gguf/resolve/main/gemma-4-12b-it-qat-q4_0.gguf".to_string(),
@@ -181,7 +181,7 @@ pub fn builtin_models() -> Vec<ModelDef> {
         },
         ModelDef {
             name: "gemma4:e4b".to_string(),
-            display_name: "Gemma 4 E4B (Balanced)".to_string(),
+            display_name: "Gemma 4 E4B (Recommended)".to_string(),
             gguf_file: "gemma-4-E4B_q4_0-it.gguf".to_string(),
             template: AUTO_TEMPLATE.to_string(),
             download_url: "https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf/resolve/main/gemma-4-E4B_q4_0-it.gguf".to_string(),

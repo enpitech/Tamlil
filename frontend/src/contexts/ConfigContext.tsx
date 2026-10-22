@@ -5,6 +5,8 @@ import { TranscriptModelProps } from '@/components/TranscriptSettings';
 import { SelectedDevices } from '@/components/DeviceSelection';
 import { configService, ModelConfig } from '@/services/configService';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
 import { BetaFeatures, BetaFeatureKey, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
 import { readSpeakerIdPreference, readMicIsMePreference } from '@/components/SpeakerIdSettings';
@@ -213,6 +215,52 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       }
     };
     loadTranscriptConfig();
+  }, []);
+
+  // A language route points at a whisper model that is not on disk (for example
+  // the Hebrew route on an installation that predates it): offer the download once.
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const routes = await invoke<Array<{ language: string; enabled: boolean; stt_provider: string | null; stt_model: string | null }>>('language_routes_list');
+        const wanted = routes.filter((r) => r.enabled && r.stt_provider === 'localWhisper' && r.stt_model);
+        if (wanted.length === 0) return;
+        await invoke('whisper_init');
+        const models = await invoke<Array<{ name: string; status: unknown }>>('whisper_get_available_models');
+        const missing = wanted.filter((r) => !models.some((m) => m.name === r.stt_model && m.status === 'Available'));
+        if (cancelled || missing.length === 0) return;
+        for (const route of missing) {
+          const modelName = route.stt_model as string;
+          const toastId = `route-model-${modelName}`;
+          toast.warning(`${route.language === 'he' ? 'Hebrew' : route.language.toUpperCase()} transcription model not downloaded`, {
+            id: toastId,
+            description: `${modelName} is needed to transcribe ${route.language === 'he' ? 'Hebrew' : route.language.toUpperCase()}. Download it now (${modelName.includes('turbo') ? '1.5 GB' : 'about 3 GB'})?`,
+            duration: 20000,
+            action: {
+              label: 'Download',
+              onClick: () => {
+                toast.loading(`Downloading ${modelName}… 0%`, { id: toastId, duration: Infinity });
+                let unlistenProgress: (() => void) | undefined;
+                listen<{ modelName: string; progress: number }>('model-download-progress', (e) => {
+                  if (e.payload.modelName === modelName) {
+                    toast.loading(`Downloading ${modelName}… ${e.payload.progress}%`, { id: toastId, duration: Infinity });
+                  }
+                }).then((fn) => { unlistenProgress = fn; });
+                invoke('whisper_download_model', { modelName })
+                  .then(() => toast.success(`${modelName} is ready`, { id: toastId, duration: 5000 }))
+                  .catch((err) => toast.error(`Download failed: ${err instanceof Error ? err.message : String(err)}`, { id: toastId, duration: 8000 }))
+                  .finally(() => { if (unlistenProgress) unlistenProgress(); });
+              },
+            },
+          });
+        }
+      } catch (err) {
+        console.warn('[ConfigContext] Could not check language route models:', err);
+      }
+    };
+    const timer = setTimeout(() => { void check(); }, 4000);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, []);
 
   // Sync the speaker-identification preference to Rust on mount

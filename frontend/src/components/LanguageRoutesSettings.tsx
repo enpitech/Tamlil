@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
 import { Plus, Trash2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -23,6 +24,9 @@ interface SummaryOption {
   model: string;
   label: string;
 }
+
+/** Whisper models the routes refer to that are not on disk yet (name → true). */
+type MissingWhisper = Record<string, boolean>;
 
 interface ParakeetRawModel {
   name: string;
@@ -56,6 +60,8 @@ export function LanguageRoutesSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [newLanguage, setNewLanguage] = useState('he');
+  const [missingWhisper, setMissingWhisper] = useState<MissingWhisper>({});
+  const [downloading, setDownloading] = useState<Record<string, number>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -83,6 +89,11 @@ export function LanguageRoutesSettings() {
         })),
       ];
       setSttOptions(stt);
+      const missing: MissingWhisper = {};
+      for (const m of whisper) {
+        if (m.status !== 'Available') missing[m.name] = true;
+      }
+      setMissingWhisper(missing);
 
       setSummaryOptions(
         builtin.map((m) => ({
@@ -104,6 +115,49 @@ export function LanguageRoutesSettings() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Progress of whisper downloads started from this panel
+  useEffect(() => {
+    const unlistenProgress = listen<{ modelName: string; progress: number }>('model-download-progress', (e) => {
+      setDownloading((d) => (e.payload.modelName in d ? { ...d, [e.payload.modelName]: e.payload.progress } : d));
+    });
+    const unlistenDone = listen<{ modelName: string }>('model-download-complete', (e) => {
+      setDownloading((d) => {
+        const next = { ...d };
+        delete next[e.payload.modelName];
+        return next;
+      });
+      void load();
+    });
+    const unlistenError = listen<{ modelName: string; error: string }>('model-download-error', (e) => {
+      setDownloading((d) => {
+        const next = { ...d };
+        delete next[e.payload.modelName];
+        return next;
+      });
+      toast.error('Model download failed', { description: e.payload.error });
+    });
+    return () => {
+      unlistenProgress.then((fn) => fn());
+      unlistenDone.then((fn) => fn());
+      unlistenError.then((fn) => fn());
+    };
+  }, [load]);
+
+  const downloadWhisper = async (modelName: string) => {
+    setDownloading((d) => ({ ...d, [modelName]: 0 }));
+    try {
+      await invoke('whisper_init');
+      await invoke('whisper_download_model', { modelName });
+    } catch (err) {
+      setDownloading((d) => {
+        const next = { ...d };
+        delete next[modelName];
+        return next;
+      });
+      toast.error('Model download failed', { description: err instanceof Error ? err.message : String(err) });
+    }
+  };
 
   const languageName = (code: string) =>
     LANGUAGES.find((l) => l.code === code)?.name ?? code.toUpperCase();
@@ -250,6 +304,27 @@ export function LanguageRoutesSettings() {
                       </option>
                     ))}
                   </select>
+                  {route.stt_provider === 'localWhisper' && route.stt_model && missingWhisper[route.stt_model] && (
+                    <span className="flex items-center gap-2 pt-1">
+                      {route.stt_model in downloading ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />
+                          <span className="text-amber-700">Downloading… {downloading[route.stt_model]}%</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-amber-700">Model not downloaded; {languageName(route.language)} will fall back to the global model.</span>
+                          <button
+                            type="button"
+                            className="rounded border border-gray-300 bg-white px-2 py-0.5 text-xs font-medium text-gray-800 hover:bg-gray-50"
+                            onClick={() => downloadWhisper(route.stt_model as string)}
+                          >
+                            Download
+                          </button>
+                        </>
+                      )}
+                    </span>
+                  )}
                 </label>
 
                 <label className="space-y-1 text-xs text-gray-600">

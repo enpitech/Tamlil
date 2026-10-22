@@ -8,8 +8,7 @@ use tokio::sync::Mutex;
 
 use super::model_manager::{DownloadProgress, ModelInfo, ModelManager};
 
-/// Effective floors (reported RAM is a little under the nominal size): 16 GB and 8 GB machines.
-const GEMMA4_12B_RECOMMENDED_RAM_GB: u64 = 14;
+/// Effective floor for an 8 GB machine (reported RAM is a little under the nominal size).
 const GEMMA4_E4B_RECOMMENDED_RAM_GB: u64 = 7;
 
 pub(crate) fn summary_model_priority(model_name: &str) -> u8 {
@@ -26,12 +25,12 @@ pub(crate) fn summary_model_priority(model_name: &str) -> u8 {
     }
 }
 
-/// Default summary model by memory. Gemma 4 handles Hebrew and English alike,
-/// so one model serves every language route; tiny machines fall back to Qwen 2B.
+/// Default summary model: Gemma 4 E4B handles Hebrew and English alike and runs
+/// on any 8 GB machine, so it is the out-of-the-box choice; bigger models
+/// (Gemma 4 12B, DictaLM 3.0) are offered in the model list. Tiny machines fall
+/// back to Qwen 2B.
 pub(crate) fn recommend_summary_model(_is_macos: bool, system_ram_gb: u64) -> &'static str {
-    if system_ram_gb >= GEMMA4_12B_RECOMMENDED_RAM_GB {
-        "gemma4:12b"
-    } else if system_ram_gb >= GEMMA4_E4B_RECOMMENDED_RAM_GB {
+    if system_ram_gb >= GEMMA4_E4B_RECOMMENDED_RAM_GB {
         "gemma4:e4b"
     } else {
         "qwen3.5:2b"
@@ -445,9 +444,9 @@ mod tests {
     }
 
     #[test]
-    fn recommended_summary_model_uses_gemma4_12b_at_effective_16gb_floor() {
-        assert_eq!(recommend_summary_model(true, 14), "gemma4:12b");
-        assert_eq!(recommend_summary_model(false, 14), "gemma4:12b");
+    fn recommended_summary_model_is_gemma4_e4b_on_big_machines_too() {
+        assert_eq!(recommend_summary_model(true, 14), "gemma4:e4b");
+        assert_eq!(recommend_summary_model(false, 64), "gemma4:e4b");
     }
 
     #[test]

@@ -595,6 +595,19 @@ pub fn run() {
             })
             .expect("Failed to initialize database");
 
+            // Installations that predate language routes get the default Hebrew route
+            // (new installs get it from onboarding). Only when no route exists yet.
+            if let Some(state) = _app.try_state::<state::AppState>() {
+                let pool = state.db_manager.pool().clone();
+                tauri::async_runtime::spawn(async move {
+                    match language_routing::LanguageRouteRepository::seed_hebrew_default(&pool).await {
+                        Ok(true) => log::info!("Seeded the default Hebrew language route"),
+                        Ok(false) => {}
+                        Err(e) => log::warn!("Could not seed the default Hebrew language route: {}", e),
+                    }
+                });
+            }
+
             // Initialize bundled templates directory for dynamic template discovery
             log::info!("Initializing bundled templates directory...");
             if let Ok(resource_path) = _app.handle().path().resource_dir() {

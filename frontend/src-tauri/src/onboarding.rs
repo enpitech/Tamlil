@@ -6,7 +6,7 @@ use anyhow::Result;
 
 use crate::state::AppState;
 use crate::database::repositories::setting::SettingsRepository;
-use crate::language_routing::{LanguageRoute, LanguageRouteRepository, HEBREW_WHISPER_MODEL};
+use crate::language_routing::LanguageRouteRepository;
 
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -203,27 +203,11 @@ pub async fn complete_onboarding<R: Runtime>(
     }
     info!("Saved transcription model config: provider=parakeet, model={}", crate::config::DEFAULT_PARAKEET_MODEL);
 
-    // Hebrew route: ivrit.ai whisper for transcription, summaries written directly
-    // in Hebrew by the global model (Gemma 4 handles Hebrew). Only seeded when the
-    // user has not configured a Hebrew route themselves.
-    match LanguageRouteRepository::get(pool, "he").await {
-        Ok(Some(_)) => info!("Hebrew language route already configured; leaving it as is"),
-        Ok(None) => {
-            let route = LanguageRoute {
-                language: "he".to_string(),
-                stt_provider: Some("localWhisper".to_string()),
-                stt_model: Some(HEBREW_WHISPER_MODEL.to_string()),
-                summary_provider: None,
-                summary_model: None,
-                summary_mode: "direct".to_string(),
-                enabled: true,
-            };
-            match LanguageRouteRepository::upsert(pool, route).await {
-                Ok(_) => info!("Seeded Hebrew language route (ivrit.ai whisper, direct Hebrew summaries)"),
-                Err(e) => warn!("Could not seed the Hebrew language route: {}", e),
-            }
-        }
-        Err(e) => warn!("Could not read language routes: {}", e),
+    // Hebrew route (ivrit.ai whisper, direct Hebrew summaries) unless routes exist already
+    match LanguageRouteRepository::seed_hebrew_default(pool).await {
+        Ok(true) => info!("Seeded the Hebrew language route"),
+        Ok(false) => info!("Language routes already configured; leaving them as they are"),
+        Err(e) => warn!("Could not seed the Hebrew language route: {}", e),
     }
 
     // Step 2: Only NOW mark onboarding as complete (after DB operations succeed)

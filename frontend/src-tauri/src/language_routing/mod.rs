@@ -127,6 +127,33 @@ impl LanguageRouteRepository {
         Ok(count > 0)
     }
 
+    /// Default Hebrew route: ivrit.ai whisper for transcription, summaries written
+    /// directly in Hebrew by the global summary model. Seeded once, when no route
+    /// exists yet (onboarding, or the first start of an installation that predates
+    /// language routes). Returns true when a route was created.
+    pub async fn seed_hebrew_default(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM language_routes")
+            .fetch_one(pool)
+            .await?;
+        if count > 0 {
+            return Ok(false);
+        }
+        Self::upsert(
+            pool,
+            LanguageRoute {
+                language: "he".to_string(),
+                stt_provider: Some("localWhisper".to_string()),
+                stt_model: Some(HEBREW_WHISPER_MODEL.to_string()),
+                summary_provider: None,
+                summary_model: None,
+                summary_mode: SUMMARY_MODE_DIRECT.to_string(),
+                enabled: true,
+            },
+        )
+        .await?;
+        Ok(true)
+    }
+
     pub async fn upsert(pool: &SqlitePool, route: LanguageRoute) -> Result<LanguageRoute, sqlx::Error> {
         let route = route.normalised();
         if route.language.is_empty() {
