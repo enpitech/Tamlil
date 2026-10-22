@@ -707,6 +707,25 @@ pub struct AudioPipeline {
     mixer: ProfessionalAudioMixer,
     // Recording sender for pre-mixed audio
     recording_sender_for_mixed: Option<mpsc::UnboundedSender<AudioChunk>>,
+    // Energy of the microphone and system streams since the last VAD segment was
+    // emitted. Transcription chunks are tagged with the dominant source so speaker
+    // identification can tell the local user from remote voices.
+    segment_mic_energy: f64,
+    segment_system_energy: f64,
+}
+
+/// Which source a mixed VAD segment mostly came from. System audio wins only when it
+/// clearly dominates, so a mic-only setup always reports the microphone.
+pub(crate) fn dominant_source(mic_energy: f64, system_energy: f64) -> DeviceType {
+    if system_energy > mic_energy * 1.5 && system_energy > 0.0 {
+        DeviceType::System
+    } else {
+        DeviceType::Microphone
+    }
+}
+
+fn energy(samples: &[f32]) -> f64 {
+    samples.iter().map(|s| (*s as f64) * (*s as f64)).sum()
 }
 
 impl AudioPipeline {
@@ -785,6 +804,8 @@ impl AudioPipeline {
             ring_buffer,
             mixer,
             recording_sender_for_mixed: None,  // Will be set by manager
+            segment_mic_energy: 0.0,
+            segment_system_energy: 0.0,
         })
     }
 
@@ -849,6 +870,8 @@ impl AudioPipeline {
                         if let Some((mic_window, sys_window)) = self.ring_buffer.extract_window() {
                             // Simple mixing without aggressive ducking
                             let mixed_clean = self.mixer.mix_window(&mic_window, &sys_window);
+                            self.segment_mic_energy += energy(&mic_window);
+                            self.segment_system_energy += energy(&sys_window);
 
                             // NO POST-GAIN NEEDED: Microphone already normalized by EBU R128 to -23 LUFS
                             // This is broadcast-standard loudness (Netflix/YouTube/Spotify level)
@@ -859,19 +882,24 @@ impl AudioPipeline {
                             // STEP 3: Send mixed audio for transcription (VAD + Whisper)
                             match self.vad_processor.process_audio(&mixed_with_gain) {
                                 Ok(speech_segments) => {
+                                    let source = dominant_source(self.segment_mic_energy, self.segment_system_energy);
+                                    if !speech_segments.is_empty() {
+                                        self.segment_mic_energy = 0.0;
+                                        self.segment_system_energy = 0.0;
+                                    }
                                     for segment in speech_segments {
                                         let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
 
                                         if segment.samples.len() >= 800 {  // Minimum 50ms at 16kHz - matches Parakeet capability
-                                            info!("📤 Sending VAD segment: {:.1}ms, {} samples",
-                                                  duration_ms, segment.samples.len());
+                                            info!("📤 Sending VAD segment: {:.1}ms, {} samples ({:?} dominant)",
+                                                  duration_ms, segment.samples.len(), source);
 
                                             let transcription_chunk = AudioChunk {
                                                 data: segment.samples,
                                                 sample_rate: 16000,
                                                 timestamp: segment.start_timestamp_ms / 1000.0,
                                                 chunk_id: self.chunk_id_counter,
-                                                device_type: DeviceType::Microphone,  // Mixed audio
+                                                device_type: source.clone(),  // Mixed audio, tagged by dominant source
                                             };
 
                                             if let Err(e) = self.transcription_sender.send(transcription_chunk) {
@@ -941,7 +969,7 @@ impl AudioPipeline {
                             sample_rate: 16000,
                             timestamp: segment.start_timestamp_ms / 1000.0,
                             chunk_id: self.chunk_id_counter,
-                            device_type: DeviceType::Microphone,
+                            device_type: dominant_source(self.segment_mic_energy, self.segment_system_energy),
                         };
 
                         if let Err(e) = self.transcription_sender.send(transcription_chunk) {
@@ -1105,6 +1133,16 @@ impl Default for AudioPipelineManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dominant_source_prefers_microphone_unless_system_clearly_wins() {
+        assert_eq!(dominant_source(0.0, 0.0), DeviceType::Microphone);
+        assert_eq!(dominant_source(1.0, 1.2), DeviceType::Microphone);
+        assert_eq!(dominant_source(1.0, 2.0), DeviceType::System);
+        assert_eq!(dominant_source(0.0, 0.1), DeviceType::System);
+        assert_eq!(energy(&[0.5, -0.5]), 0.5);
+    }
+
 
     #[test]
     fn test_live_vad_redemption_matches_pro_policy() {

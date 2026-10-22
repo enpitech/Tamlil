@@ -8,8 +8,10 @@
 //! Who is "You": when the user has marked a remembered voice as their own
 //! (`profiles::VoiceProfile::is_me`) that voice is "You" wherever it is heard.
 //! Otherwise, while the "my microphone is only me" setting is on (default),
-//! the first voice on the microphone channel is assumed to be the user. Turn
-//! it off when other people share the mic (a phone on speaker, a meeting room).
+//! every chunk whose audio came mostly from the microphone (the pipeline tags
+//! each VAD segment with its dominant source) is the user. Turn it off when
+//! other people share the mic (a phone on speaker, a meeting room); voices are
+//! then told apart by embedding alone.
 //!
 //! Labels are per recording; only voices the user names are stored.
 
@@ -38,11 +40,12 @@ pub const MODEL_URL: &str =
     "https://huggingface.co/Wespeaker/wespeaker-voxceleb-campplus-LM/resolve/c5e01c6fcffcce160861e7e79782828320192b5c/voxceleb_CAM%2B%2B_LM.onnx";
 pub const MODEL_BYTES: u64 = 29_292_449;
 
-/// Cosine similarity needed to join an existing speaker.
-const SAME_SPEAKER_THRESHOLD: f32 = 0.55;
+/// Cosine similarity needed to join an existing speaker. Same-speaker clips of a
+/// few seconds typically score 0.5-0.8 with CAM++, different speakers 0.0-0.3.
+const SAME_SPEAKER_THRESHOLD: f32 = 0.45;
 /// Shorter chunks are too unreliable to open a new speaker; they attach to the
 /// closest existing one (or the previous speaker when nothing is close).
-const MIN_SECONDS_FOR_NEW_SPEAKER: f32 = 1.5;
+const MIN_SECONDS_FOR_NEW_SPEAKER: f32 = 2.5;
 /// Hard cap so noise cannot create endless speakers.
 const MAX_SPEAKERS: usize = 12;
 /// Similarity needed to label a voice with a remembered (named) profile.
@@ -395,6 +398,23 @@ impl SpeakerTracker {
     }
 
     pub fn assign(&mut self, embedding: &[f32], device: DeviceType, seconds: f32) -> SpeakerLabel {
+        // "My microphone is only me": whatever comes mostly from the mic is the user.
+        if self.guess_you && device == DeviceType::Microphone {
+            if let Some(idx) = self.speakers.iter().position(|s| s.label == "You") {
+                let sim = cosine(embedding, &self.speakers[idx].centroid);
+                self.update_centroid(idx, embedding);
+                self.last_index = Some(idx);
+                return SpeakerLabel { index: idx as u32, label: "You".to_string(), confidence: sim.max(0.0), relabeled: false };
+            }
+            if self.speakers.len() < MAX_SPEAKERS {
+                self.has_you = true;
+                self.speakers.push(Speaker { centroid: embedding.to_vec(), count: 1, label: "You".to_string(), profile_id: None });
+                let idx = self.speakers.len() - 1;
+                self.last_index = Some(idx);
+                return SpeakerLabel { index: idx as u32, label: "You".to_string(), confidence: 1.0, relabeled: false };
+            }
+        }
+
         let best = self
             .speakers
             .iter()
@@ -528,14 +548,18 @@ mod tests {
 
         // A short, unrelated clip must not create a third speaker
         let c = unit(&[0.0, 0.0, 1.0, 0.0]);
-        let short = t.assign(&c, DeviceType::System, 0.8);
+        let short = t.assign(&c, DeviceType::System, 2.0);
         assert_eq!(t.speaker_count(), 2);
         assert_eq!(short.index, 1, "falls back to the previous speaker");
 
-        // The mic voice stays "You"; a second mic voice becomes a numbered speaker
+        // "My microphone is only me": a different-sounding mic chunk is still "You"
         let d = unit(&[0.0, 0.0, 0.0, 1.0]);
         let second_mic = t.assign(&d, DeviceType::Microphone, 3.0);
-        assert_eq!(second_mic.label, "Speaker 2");
+        assert_eq!(second_mic.label, "You");
+        assert_eq!(second_mic.index, 0);
+        // ...but a different voice on system audio is a new speaker
+        let far = t.assign(&d, DeviceType::System, 3.0);
+        assert_eq!(far.label, "Speaker 2");
     }
 
     #[test]

@@ -81,6 +81,23 @@ pub async fn auto_detection_wanted<R: Runtime>(app: &AppHandle<R>) -> bool {
     }
 }
 
+/// Whisper models that enabled language routes point at (candidates for the
+/// language-identification pass, so the later switch needs no second load).
+pub async fn routed_whisper_models<R: Runtime>(app: &AppHandle<R>) -> Vec<String> {
+    let state = app.state::<AppState>();
+    match LanguageRouteRepository::list(state.db_manager.pool()).await {
+        Ok(routes) => routes
+            .into_iter()
+            .filter(|r| r.enabled && r.stt_provider.as_deref() == Some("localWhisper"))
+            .filter_map(|r| r.stt_model)
+            .collect(),
+        Err(e) => {
+            log::warn!("Could not read language routes: {}", e);
+            Vec::new()
+        }
+    }
+}
+
 fn default_transcript_config() -> TranscriptConfig {
     TranscriptConfig {
         provider: "parakeet".to_string(),

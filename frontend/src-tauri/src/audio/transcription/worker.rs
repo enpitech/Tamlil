@@ -489,7 +489,8 @@ impl LanguageRouter {
         }
 
         self.attempts += 1;
-        let detection = detect_language_with_available_whisper(engine, &self.buffer).await;
+        let preferred = session::routed_whisper_models(app).await;
+        let detection = detect_language_with_available_whisper(engine, &self.buffer, &preferred).await;
         let (code, confidence) = match detection {
             Ok(result) => result,
             Err(e) => {
@@ -586,6 +587,7 @@ impl LanguageRouter {
 async fn detect_language_with_available_whisper(
     engine: &TranscriptionEngine,
     audio: &[f32],
+    preferred_models: &[String],
 ) -> std::result::Result<(String, f32), String> {
     if let TranscriptionEngine::Whisper(whisper) = engine {
         return whisper.detect_language(audio).await.map_err(|e| e.to_string());
@@ -600,11 +602,16 @@ async fn detect_language_with_available_whisper(
     };
     if !whisper.is_model_loaded().await {
         let models = whisper.discover_models().await.map_err(|e| e.to_string())?;
-        // Smallest available model is plenty for language identification
-        let candidate = models
+        let available: Vec<_> = models
             .iter()
             .filter(|m| matches!(m.status, crate::whisper_engine::ModelStatus::Available))
-            .min_by_key(|m| m.size_mb)
+            .collect();
+        // Prefer a model a language route will switch to anyway (saves a second
+        // load); otherwise the smallest available model is plenty for language ID.
+        let candidate = available
+            .iter()
+            .find(|m| preferred_models.iter().any(|p| p == &m.name))
+            .or_else(|| available.iter().min_by_key(|m| m.size_mb))
             .ok_or_else(|| "No whisper model available for language detection".to_string())?;
         whisper.load_model(&candidate.name).await.map_err(|e| e.to_string())?;
     }
