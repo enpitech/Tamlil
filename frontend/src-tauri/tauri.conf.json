@@ -112,7 +112,7 @@
     },
     "plugins": {
         "updater": {
-            "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVDQTYzMUQ3ODc5N0M4MkEKUldRcXlKZUgxekdtN09DRkVWSHNpZlJseEVOUmpNd1dDSTNaLzZ3MXJGTnY3WW1pdnlOYjBpbkIK",
+            "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc4NUQ1Mjk2RTUyM0I1QjQKUldTMHRTUGxsbEpkZUd4dlQ0dmxSWm1TSUxjV1czQ3hGd1FXSy83cUNuNmg2MmlmYmlKZmZNSlYK",
             "endpoints": [
                 "https://github.com/enpitech/tamlil/releases/latest/download/latest.json"
             ]

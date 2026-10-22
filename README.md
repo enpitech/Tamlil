@@ -59,7 +59,7 @@ git rebase upstream/main   # or merge, per team preference
 
 ## Auto-update
 
-`tauri.conf.json` points the updater at this repository's releases. Generate a new signing key pair before publishing releases and replace `plugins.updater.pubkey`; the upstream key is still in place and will reject builds signed with any other key.
+`tauri.conf.json` points the updater at this repository's releases and carries Tamlil's own updater public key. The matching private key lives in the `TAURI_SIGNING_PRIVATE_KEY` repository secret (no password). Keep an offline backup of that key: if it is lost, existing installs can no longer verify updates and a new key means a manual reinstall for every user.
 
 ## License
 
