@@ -641,7 +641,7 @@ impl WhisperEngine {
         // CRITICAL: Disable timestamp tokens to prevent whisper.cpp chunking heuristics
         // The "single timestamp ending - skip entire chunk" optimization incorrectly discards
         // complete, valid transcriptions. Disabling timestamps forces whisper to return ALL text.
-        params.set_no_timestamps(true);     // Prevent timestamp-based segment skipping
+        params.set_no_timestamps(qa_env_bool("TAMLIL_WHISPER_NO_TIMESTAMPS", true));     // Prevent timestamp-based segment skipping
         params.set_token_timestamps(true);  // Keep for any timestamp-aware features
 
         // PERFORMANCE: Disable ALL whisper.cpp internal printing
@@ -655,7 +655,7 @@ impl WhisperEngine {
         params.set_suppress_blank(true);
         params.set_suppress_non_speech_tokens(true);
         params.set_temperature(adaptive_config.temperature);
-        params.set_max_initial_ts(1.0);
+        params.set_max_initial_ts(qa_env_f32("TAMLIL_WHISPER_MAX_INITIAL_TS", 1.0));
         params.set_entropy_thold(2.4);
         params.set_logprob_thold(-1.0);
         // BALANCED FIX: Lowered from 0.75 to 0.55 to allow quiet speech detection
@@ -764,7 +764,7 @@ impl WhisperEngine {
         // CRITICAL: Disable timestamp tokens to prevent whisper.cpp chunking heuristics
         // The "single timestamp ending - skip entire chunk" optimization incorrectly discards
         // complete, valid transcriptions. Disabling timestamps forces whisper to return ALL text.
-        params.set_no_timestamps(true);     // Prevent timestamp-based segment skipping
+        params.set_no_timestamps(qa_env_bool("TAMLIL_WHISPER_NO_TIMESTAMPS", true));     // Prevent timestamp-based segment skipping
         params.set_token_timestamps(true);  // Keep for any timestamp-aware features
 
         params.set_print_special(false);
@@ -776,7 +776,7 @@ impl WhisperEngine {
         params.set_suppress_blank(true);
         params.set_suppress_non_speech_tokens(true);
         params.set_temperature(0.3);             // Lower than 0.4 for consistency, higher than 0.0 for quality
-        params.set_max_initial_ts(1.0);
+        params.set_max_initial_ts(qa_env_f32("TAMLIL_WHISPER_MAX_INITIAL_TS", 1.0));
         params.set_entropy_thold(2.4);
         params.set_logprob_thold(-1.0);
         // BALANCED FIX: Lowered from 0.75 to 0.55 to allow quiet speech detection
@@ -1352,6 +1352,19 @@ impl WhisperEngine {
     }
 }
 
+
+/// QA knobs (`TAMLIL_WHISPER_*`); production uses the defaults.
+fn qa_env_bool(name: &str, default: bool) -> bool {
+    match std::env::var(name).as_deref() {
+        Ok("0") | Ok("false") => false,
+        Ok("1") | Ok("true") => true,
+        _ => default,
+    }
+}
+
+fn qa_env_f32(name: &str, default: f32) -> f32 {
+    std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+}
 
 /// Encoder context length for a chunk of this many seconds, or `None` to keep
 /// whisper's full 30 s window. Whisper maps 30 s to 1500 encoder positions;
