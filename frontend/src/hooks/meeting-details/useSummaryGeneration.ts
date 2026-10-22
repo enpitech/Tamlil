@@ -433,7 +433,22 @@ export function useSummaryGeneration({
     }
   }, []);
 
+  // The user's own lines are labelled "You" in the transcript. For the summary,
+  // use the name they gave their own voice (Settings → remembered voices) when
+  // it is a real name, so a Hebrew summary does not carry a literal "You".
+  const [selfName, setSelfName] = useState<string | null>(null);
+  useEffect(() => {
+    invokeTauri<Array<{ name: string; is_me: boolean }>>('speaker_profiles_list')
+      .then((profiles) => {
+        const me = profiles.find((p) => p.is_me);
+        const name = me?.name?.trim();
+        setSelfName(name && !['me', 'you', 'myself'].includes(name.toLowerCase()) ? name : null);
+      })
+      .catch(() => setSelfName(null));
+  }, []);
+
   const buildSummaryTranscriptPayload = useCallback((allTranscripts: Transcript[]) => {
+    const speakerLabel = (label: string | undefined) => (label === 'You' && selfName ? selfName : label);
     const formatTime = (seconds: number | undefined, fallbackTimestamp: string): string => {
       if (seconds === undefined) {
         return fallbackTimestamp;
@@ -444,11 +459,11 @@ export function useSummaryGeneration({
 
     return {
       transcriptText: allTranscripts
-        .map((transcript) => `${formatTime(transcript.audio_start_time, transcript.timestamp)} ${transcript.speaker ? `${transcript.speaker}: ` : ''}${transcript.text}`)
+        .map((transcript) => `${formatTime(transcript.audio_start_time, transcript.timestamp)} ${transcript.speaker ? `${speakerLabel(transcript.speaker)}: ` : ''}${transcript.text}`)
         .join('\n'),
       transcriptTexts: allTranscripts.map((transcript) => transcript.text),
     };
-  }, []);
+  }, [selfName]);
 
   const showPreflightError = useCallback((message: string) => {
     setSummaryError(message);
