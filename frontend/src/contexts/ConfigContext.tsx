@@ -7,6 +7,7 @@ import { configService, ModelConfig } from '@/services/configService';
 import { invoke } from '@tauri-apps/api/core';
 import Analytics from '@/lib/analytics';
 import { BetaFeatures, BetaFeatureKey, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
+import { readSpeakerIdPreference } from '@/components/SpeakerIdSettings';
 
 export interface OllamaModel {
   name: string;
@@ -212,6 +213,14 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       }
     };
     loadTranscriptConfig();
+  }, []);
+
+  // Sync the speaker-identification preference to Rust on mount
+  useEffect(() => {
+    const enabled = readSpeakerIdPreference();
+    invoke('speaker_id_set_enabled', { enabled }).catch((err) =>
+      console.error('[ConfigContext] Failed to sync speaker identification preference:', err)
+    );
   }, []);
 
   // Sync language preference to Rust on mount (fixes startup desync bug)

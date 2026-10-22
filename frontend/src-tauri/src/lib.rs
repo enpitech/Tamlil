@@ -49,6 +49,7 @@ pub mod groq;
 pub mod language_routing;
 pub mod model_registry;
 pub mod openrouter;
+pub mod speaker_id;
 pub mod parakeet_engine;
 pub mod state;
 pub mod summary;
@@ -542,7 +543,10 @@ pub fn run() {
 
             // Model registry (built-in + user-added + discovered models) lives next to the model files
             match _app.handle().path().app_data_dir() {
-                Ok(app_data_dir) => model_registry::init(app_data_dir.join("models")),
+                Ok(app_data_dir) => {
+                    model_registry::init(app_data_dir.join("models"));
+                    speaker_id::init(&app_data_dir);
+                }
                 Err(e) => log::error!("Failed to resolve app data dir for the model registry: {}", e),
             }
 
@@ -637,6 +641,11 @@ pub fn run() {
             language_routing::commands::language_routes_upsert,
             language_routing::commands::language_routes_delete,
             language_routing::commands::language_routes_detected_language,
+            // Speaker identification commands
+            speaker_id::commands::speaker_id_get_status,
+            speaker_id::commands::speaker_id_set_enabled,
+            speaker_id::commands::speaker_id_download_model,
+            speaker_id::commands::speaker_id_delete_model,
             whisper_engine::commands::whisper_load_model,
             whisper_engine::commands::whisper_get_current_model,
             whisper_engine::commands::whisper_is_model_loaded,

@@ -5,7 +5,7 @@
 <br>
 
 **Record, transcribe and summarize meetings on your own machine.**
-No cloud, no account, no telemetry. Built for Hebrew and mixed Hebrew/English meetings, works in 50+ languages.
+No cloud, no account, no telemetry. Built for Hebrew and mixed Hebrew/English meetings, works in 50+ languages. Speakers are told apart by voice, each with its own avatar.
 
 <br>
 

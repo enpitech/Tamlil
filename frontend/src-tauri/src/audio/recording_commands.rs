@@ -331,8 +331,9 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
 
     // Validate that transcription models are available before starting recording
     info!("🔍 Validating transcription model availability before starting recording...");
-    // New recording: forget any language detected for the previous one
+    // New recording: forget any language detected for the previous one and start a fresh speaker roster
     crate::language_routing::session::reset();
+    crate::speaker_id::reset_session();
     if let Err(validation_error) = transcription::validate_transcription_model_ready(&app).await {
         error!("Model validation failed: {}", validation_error);
 
@@ -454,6 +455,8 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
                     display_time: update.timestamp.clone(), // Use wall-clock timestamp for display
                     confidence: update.confidence,
                     sequence_id: update.sequence_id,
+                    speaker: update.speaker.clone(),
+                    speaker_index: update.speaker_index,
                 };
 
                 // Save to recording manager
@@ -523,8 +526,9 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
 
     // Validate that transcription models are available before starting recording
     info!("🔍 Validating transcription model availability before starting recording...");
-    // New recording: forget any language detected for the previous one
+    // New recording: forget any language detected for the previous one and start a fresh speaker roster
     crate::language_routing::session::reset();
+    crate::speaker_id::reset_session();
     if let Err(validation_error) = transcription::validate_transcription_model_ready(&app).await {
         error!("Model validation failed: {}", validation_error);
 
@@ -643,6 +647,8 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
                     display_time: update.timestamp.clone(), // Use wall-clock timestamp for display
                     confidence: update.confidence,
                     sequence_id: update.sequence_id,
+                    speaker: update.speaker.clone(),
+                    speaker_index: update.speaker_index,
                 };
 
                 // Save to recording manager

@@ -7,6 +7,7 @@ import { Label } from './ui/label';
 import { Eye, EyeOff, Lock, Unlock } from 'lucide-react';
 import { ModelManager } from './WhisperModelManager';
 import { ParakeetModelManager } from './ParakeetModelManager';
+import { SpeakerIdSettings } from './SpeakerIdSettings';
 
 
 export interface TranscriptModelProps {
@@ -220,6 +221,11 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                         </div>
                     )}
                 </div>
+            </div>
+
+            {/* Speaker identification (beta) */}
+            <div className="mt-6">
+                <SpeakerIdSettings />
             </div>
         </div >
     )

@@ -42,6 +42,12 @@ pub struct TranscriptUpdate {
     pub audio_start_time: f64, // Seconds from recording start (e.g., 125.3)
     pub audio_end_time: f64,   // Seconds from recording start (e.g., 128.6)
     pub duration: f64,          // Segment duration in seconds (e.g., 3.3)
+    /// Speaker label ("You", "Speaker 1", ...) when speaker identification is on
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<String>,
+    /// Stable per-recording speaker index (drives the avatar in the UI)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker_index: Option<u32>,
 }
 
 // NOTE: get_transcript_history and get_recording_meeting_name functions
@@ -157,6 +163,21 @@ pub fn start_transcription_task<R: Runtime>(
                             let chunk_timestamp = chunk.timestamp;
                             let chunk_duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
 
+                            // Speaker identification runs on a copy of the chunk (the chunk itself is
+                            // moved into transcription). Skipped entirely when the feature is off.
+                            let speaker_audio = if crate::speaker_id::is_active() {
+                                Some((
+                                    if chunk.sample_rate != 16_000 {
+                                        crate::audio::audio_processing::resample_audio(&chunk.data, chunk.sample_rate, 16_000)
+                                    } else {
+                                        chunk.data.clone()
+                                    },
+                                    chunk.device_type.clone(),
+                                ))
+                            } else {
+                                None
+                            };
+
                             // Language identification + model routing on the first seconds of speech
                             if language_router.pending() {
                                 if let Some(new_engine) =
@@ -184,6 +205,10 @@ pub fn start_transcription_task<R: Runtime>(
                 worker_id, transcript, confidence_str, is_partial);
 
                                     if should_emit_transcript(&transcript) {
+                                        // Who said it (only for chunks that produced text)
+                                        let speaker = speaker_audio
+                                            .as_ref()
+                                            .and_then(|(audio, device)| crate::speaker_id::identify(audio, device.clone()));
                                         // PERFORMANCE: Only log transcription results, not every processing step
                                         info!("✅ Worker {} transcribed: {} (confidence: {}, partial: {})",
                                               worker_id, transcript, confidence_str, is_partial);
@@ -231,6 +256,8 @@ pub fn start_transcription_task<R: Runtime>(
                                             audio_start_time,
                                             audio_end_time,
                                             duration: chunk_duration,
+                                            speaker: speaker.as_ref().map(|s| s.label.clone()),
+                                            speaker_index: speaker.as_ref().map(|s| s.index),
                                         };
 
                                         if let Err(e) = app_clone.emit("transcript-update", &update)
