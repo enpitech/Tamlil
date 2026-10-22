@@ -81,6 +81,89 @@ pub async fn auto_detection_wanted<R: Runtime>(app: &AppHandle<R>) -> bool {
     }
 }
 
+/// Language identification independent of the transcription model.
+///
+/// Order of preference: the loaded transcription model when it is a general
+/// whisper model; otherwise the smallest general whisper model on disk, loaded
+/// once into a dedicated CPU context (`ggml-base.bin` is downloaded for this).
+/// A language-specific model (ivrit.ai) is used only as a last resort, with a
+/// warning, because it reports its own language for any input.
+pub async fn identify_language(
+    whisper: Option<&std::sync::Arc<crate::whisper_engine::WhisperEngine>>,
+    audio: &[f32],
+    preferred_models: &[String],
+) -> Result<(String, f32), String> {
+    use crate::whisper_engine::{LanguageIdentifier, ModelStatus};
+    static IDENTIFIER: std::sync::Mutex<Option<std::sync::Arc<LanguageIdentifier>>> = std::sync::Mutex::new(None);
+
+    crate::whisper_engine::commands::whisper_init().await?;
+    let engine = {
+        let guard = crate::whisper_engine::commands::WHISPER_ENGINE
+            .lock()
+            .map_err(|_| "Whisper engine lock poisoned".to_string())?;
+        guard.as_ref().cloned().ok_or_else(|| "Whisper engine not initialized".to_string())?
+    };
+    let models = engine.discover_models().await.map_err(|e| e.to_string())?;
+    let is_general = |name: &str| models.iter().any(|m| m.name == name && m.languages.is_empty());
+
+    // 1. The loaded transcription model, when general
+    if let Some(w) = whisper {
+        if let Some(current) = w.get_current_model().await {
+            if is_general(&current) {
+                return w.detect_language(audio).await.map_err(|e| e.to_string());
+            }
+        }
+    }
+
+    // 2. A dedicated small general model
+    let general_small = models
+        .iter()
+        .filter(|m| matches!(m.status, ModelStatus::Available) && m.languages.is_empty())
+        .min_by_key(|m| m.size_mb);
+    if let Some(model) = general_small {
+        let cached = IDENTIFIER.lock().ok().and_then(|g| g.clone()).filter(|i| i.model_name == model.name);
+        let identifier = match cached {
+            Some(i) => i,
+            None => {
+                let path = model.path.clone();
+                let name = model.name.clone();
+                let loaded = tokio::task::spawn_blocking(move || LanguageIdentifier::load(&name, &path))
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .map_err(|e| e.to_string())?;
+                let loaded = std::sync::Arc::new(loaded);
+                if let Ok(mut g) = IDENTIFIER.lock() {
+                    *g = Some(loaded.clone());
+                }
+                loaded
+            }
+        };
+        let window: Vec<f32> = audio.to_vec();
+        return tokio::task::spawn_blocking(move || identifier.detect(&window))
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string());
+    }
+
+    // 3. Last resort: a language-specific model (unreliable)
+    log::warn!("🌐 No general whisper model on disk; language identification with a language-specific model is unreliable");
+    if let Some(w) = whisper {
+        if w.is_model_loaded().await {
+            return w.detect_language(audio).await.map_err(|e| e.to_string());
+        }
+    }
+    if !engine.is_model_loaded().await {
+        let available: Vec<_> = models.iter().filter(|m| matches!(m.status, ModelStatus::Available)).collect();
+        let candidate = available
+            .iter()
+            .find(|m| preferred_models.iter().any(|p| p == &m.name))
+            .or_else(|| available.iter().min_by_key(|m| m.size_mb))
+            .ok_or_else(|| "No whisper model available for language detection".to_string())?;
+        engine.load_model(&candidate.name).await.map_err(|e| e.to_string())?;
+    }
+    engine.detect_language(audio).await.map_err(|e| e.to_string())
+}
+
 /// Whisper models that enabled language routes point at (candidates for the
 /// language-identification pass, so the later switch needs no second load).
 pub async fn routed_whisper_models<R: Runtime>(app: &AppHandle<R>) -> Vec<String> {

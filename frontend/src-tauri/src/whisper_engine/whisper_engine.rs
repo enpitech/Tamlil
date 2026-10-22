@@ -907,36 +907,16 @@ impl WhisperEngine {
 
     /// Identify the spoken language of a 16 kHz mono clip using the loaded
     /// model's language head. Returns the ISO-639-1 code and its probability.
+    ///
+    /// Only meaningful with a general (multilingual) model: a language-specific
+    /// fine-tune such as ivrit.ai answers its own language for any input. Prefer
+    /// [`LanguageIdentifier`] when the loaded model is language-specific.
     pub async fn detect_language(&self, audio: &[f32]) -> Result<(String, f32)> {
-        if audio.len() < 16_000 {
-            return Err(anyhow!("Need at least one second of audio for language detection"));
-        }
         let ctx_guard = self.current_context.read().await;
         let ctx = ctx_guard
             .as_ref()
             .ok_or_else(|| anyhow!("No whisper model loaded for language detection"))?;
-
-        // whisper looks at a 30 s window; cap the input so the mel step stays cheap.
-        let window = &audio[..audio.len().min(30 * 16_000)];
-        let threads = std::thread::available_parallelism()
-            .map(|n| (n.get() / 2).max(1))
-            .unwrap_or(2);
-
-        let mut state = ctx
-            .create_state()
-            .map_err(|e| anyhow!("Failed to create whisper state: {:?}", e))?;
-        state
-            .pcm_to_mel(window, threads)
-            .map_err(|e| anyhow!("Failed to compute mel spectrogram: {:?}", e))?;
-        let (lang_id, probs) = state
-            .lang_detect(0, threads)
-            .map_err(|e| anyhow!("Language detection failed: {:?}", e))?;
-        let code = whisper_rs::get_lang_str(lang_id)
-            .ok_or_else(|| anyhow!("Unknown language id {}", lang_id))?
-            .to_string();
-        let confidence = probs.get(lang_id as usize).copied().unwrap_or(0.0);
-        log::info!("🌐 Whisper language detection: {} ({:.2})", code, confidence);
-        Ok((code, confidence))
+        lang_detect_with(ctx, audio)
     }
 
     /// Validate if a model file is a valid GGML file by checking its header
@@ -1363,6 +1343,60 @@ impl WhisperEngine {
         }
 
         Ok(CancelDownloadOutcome::Cancelled)
+    }
+}
+
+
+/// Run whisper's language head on up to 30 s of 16 kHz audio.
+fn lang_detect_with(ctx: &WhisperContext, audio: &[f32]) -> Result<(String, f32)> {
+    if audio.len() < 16_000 {
+        return Err(anyhow!("Need at least one second of audio for language detection"));
+    }
+    // whisper looks at a 30 s window; cap the input so the mel step stays cheap.
+    let window = &audio[..audio.len().min(30 * 16_000)];
+    let threads = std::thread::available_parallelism()
+        .map(|n| (n.get() / 2).max(1))
+        .unwrap_or(2);
+
+    let mut state = ctx
+        .create_state()
+        .map_err(|e| anyhow!("Failed to create whisper state: {:?}", e))?;
+    state
+        .pcm_to_mel(window, threads)
+        .map_err(|e| anyhow!("Failed to compute mel spectrogram: {:?}", e))?;
+    let (lang_id, probs) = state
+        .lang_detect(0, threads)
+        .map_err(|e| anyhow!("Language detection failed: {:?}", e))?;
+    let code = whisper_rs::get_lang_str(lang_id)
+        .ok_or_else(|| anyhow!("Unknown language id {}", lang_id))?
+        .to_string();
+    let confidence = probs.get(lang_id as usize).copied().unwrap_or(0.0);
+    log::info!("🌐 Whisper language detection: {} ({:.2})", code, confidence);
+    Ok((code, confidence))
+}
+
+/// A small general whisper model kept loaded (CPU, ~150 MB for `base`) purely
+/// for language identification, independent of the transcription model. Needed
+/// because language-specific fine-tunes (ivrit.ai) cannot identify languages.
+pub struct LanguageIdentifier {
+    ctx: WhisperContext,
+    pub model_name: String,
+}
+
+impl LanguageIdentifier {
+    pub fn load(model_name: &str, path: &std::path::Path) -> Result<Self> {
+        let params = WhisperContextParameters {
+            use_gpu: false,
+            ..Default::default()
+        };
+        let ctx = WhisperContext::new_with_params(&path.to_string_lossy(), params)
+            .map_err(|e| anyhow!("Failed to load language-id model {}: {}", model_name, e))?;
+        log::info!("🌐 Language-id model '{}' loaded (CPU)", model_name);
+        Ok(Self { ctx, model_name: model_name.to_string() })
+    }
+
+    pub fn detect(&self, audio: &[f32]) -> Result<(String, f32)> {
+        lang_detect_with(&self.ctx, audio)
     }
 }
 

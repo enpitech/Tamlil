@@ -227,8 +227,13 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         const wanted = routes.filter((r) => r.enabled && r.stt_provider === 'localWhisper' && r.stt_model);
         if (wanted.length === 0) return;
         await invoke('whisper_init');
-        const models = await invoke<Array<{ name: string; status: unknown }>>('whisper_get_available_models');
+        const models = await invoke<Array<{ name: string; status: unknown; languages?: string[] }>>('whisper_get_available_models');
         const missing = wanted.filter((r) => !models.some((m) => m.name === r.stt_model && m.status === 'Available'));
+        const hasGeneral = models.some((m) => m.status === 'Available' && (!m.languages || m.languages.length === 0));
+        if (!hasGeneral && missing.length === 0 && !cancelled) {
+          // Routed model present but nothing to identify languages with: fetch the small general model quietly
+          invoke('whisper_download_model', { modelName: 'base' }).catch(() => undefined);
+        }
         if (cancelled || missing.length === 0) return;
         for (const route of missing) {
           const modelName = route.stt_model as string;
@@ -248,6 +253,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
                   }
                 }).then((fn) => { unlistenProgress = fn; });
                 invoke('whisper_download_model', { modelName })
+                  .then(() => invoke('whisper_download_model', { modelName: 'base' }).catch(() => undefined))
                   .then(() => toast.success(`${modelName} is ready`, { id: toastId, duration: 5000 }))
                   .catch((err) => toast.error(`Download failed: ${err instanceof Error ? err.message : String(err)}`, { id: toastId, duration: 8000 }))
                   .finally(() => { if (unlistenProgress) unlistenProgress(); });

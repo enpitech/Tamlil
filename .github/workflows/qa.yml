@@ -1,0 +1,201 @@
+# End-to-end QA: real models, real Hebrew speech (Google FLEURS), the app's own
+# engines. Runs the recognition suite on macOS (Apple Silicon) and Linux and the
+# Hebrew summary probe on Linux. Each job publishes its markdown report to a
+# branch (qa/<name>) so the results can be read without the raw logs.
+name: QA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'qa/**'
+      - 'frontend/src-tauri/tests/qa_e2e.rs'
+      - '.github/workflows/qa.yml'
+
+permissions:
+  contents: write
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_TERM_COLOR: always
+  CMAKE_DISABLE_FIND_PACKAGE_OpenSSL: "TRUE"
+
+jobs:
+  speech:
+    name: Recognition (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            label: macOS arm64
+            triple: aarch64-apple-darwin
+            branch: qa/speech-macos
+          - os: ubuntu-22.04
+            label: Linux x64
+            triple: x86_64-unknown-linux-gnu
+            branch: qa/speech-linux
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
+            libasound2-dev libopenblas-dev libx11-dev libxtst-dev libxrandr-dev cmake clang ffmpeg
+
+      - name: macOS dependencies
+        if: runner.os == 'macOS'
+        run: which ffmpeg || brew install ffmpeg
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          key: qa-${{ matrix.os }}
+
+      - name: Placeholder sidecar binary for the Tauri build script
+        run: |
+          mkdir -p frontend/src-tauri/binaries
+          printf '#!/bin/sh\nexit 1\n' > frontend/src-tauri/binaries/llama-helper-${{ matrix.triple }}
+          chmod +x frontend/src-tauri/binaries/llama-helper-${{ matrix.triple }}
+
+      - name: Cache FFmpeg binary
+        uses: actions/cache@v4
+        with:
+          path: frontend/src-tauri/binaries/ffmpeg-*
+          key: ${{ runner.os }}-ffmpeg-${{ hashFiles('frontend/src-tauri/build.rs', 'frontend/src-tauri/build/ffmpeg.rs') }}
+
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: qa-models
+          key: qa-models-v1
+
+      - name: Download models
+        run: |
+          mkdir -p qa-models && cd qa-models
+          [ -s ggml-ivrit-large-v3-turbo.bin ] || curl -sSL --retry 3 -o ggml-ivrit-large-v3-turbo.bin \
+            "https://huggingface.co/ivrit-ai/whisper-large-v3-turbo-ggml/resolve/main/ggml-model.bin"
+          [ -s ggml-tiny.bin ] || curl -sSL --retry 3 -o ggml-tiny.bin \
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
+          [ -s wespeaker-voxceleb-campplus-lm.onnx ] || curl -sSL --retry 3 -o wespeaker-voxceleb-campplus-lm.onnx \
+            "https://huggingface.co/Wespeaker/wespeaker-voxceleb-campplus-LM/resolve/c5e01c6fcffcce160861e7e79782828320192b5c/voxceleb_CAM%2B%2B_LM.onnx"
+          ls -l
+
+      - name: Cache speech corpus
+        uses: actions/cache@v4
+        with:
+          path: qa-data
+          key: qa-data-fleurs-v1
+
+      - name: Prepare FLEURS clips
+        run: |
+          [ -s qa-data/clips.tsv ] || python3 qa/prepare_fleurs.py qa-data 10
+          rm -rf qa-data/cache
+          wc -l qa-data/clips.tsv
+
+      - name: Build the QA harness
+        working-directory: frontend/src-tauri
+        run: cargo test --release --test qa_e2e --no-run
+
+      - name: Run recognition QA
+        id: run
+        continue-on-error: true
+        working-directory: frontend/src-tauri
+        env:
+          TAMLIL_QA_MODELS: ${{ github.workspace }}/qa-models
+          TAMLIL_QA_DATA: ${{ github.workspace }}/qa-data
+          TAMLIL_QA_SPEAKER_MODEL: ${{ github.workspace }}/qa-models/wespeaker-voxceleb-campplus-lm.onnx
+          TAMLIL_QA_REPORT: ${{ github.workspace }}/qa-report.md
+          RUST_LOG: info
+        run: |
+          {
+            echo "# Tamlil QA · ${{ matrix.label }} · run ${{ github.run_id }} · $(git rev-parse --short HEAD)"
+            echo
+            echo "Runner: $(uname -m) $(sysctl -n machdep.cpu.brand_string 2>/dev/null || grep -m1 'model name' /proc/cpuinfo | cut -d: -f2), $(nproc 2>/dev/null || sysctl -n hw.ncpu) cores"
+            echo
+          } > "$TAMLIL_QA_REPORT"
+          cargo test --release --test qa_e2e -- --ignored --nocapture --test-threads=1 2>&1 | tee qa-run.log | grep -vE "^\s*$" | tail -400
+          test "${PIPESTATUS[0]}" -eq 0
+
+      - name: Attach acceleration and failure notes to the report
+        if: always()
+        run: |
+          {
+            echo "## Run log excerpts"
+            echo
+            echo '```text'
+            grep -iE "acceleration decision|ggml_metal|metal|coreml|backend|panicked|FAILED|test result" frontend/src-tauri/qa-run.log | head -60
+            echo '```'
+          } >> qa-report.md
+          echo "Result: ${{ steps.run.outcome }}" >> qa-report.md
+
+      - name: Publish report to branch ${{ matrix.branch }}
+        if: always()
+        env:
+          BRANCH: ${{ matrix.branch }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p /tmp/pub && cp qa-report.md /tmp/pub/report.md && cp frontend/src-tauri/qa-run.log /tmp/pub/run.log || true
+          cd /tmp/pub && git init -q && git checkout -q -b "$BRANCH" && git add . \
+            && git -c user.name=tamlil-qa -c user.email=qa@users.noreply.github.com commit -q -m "QA report ${{ github.run_id }}"
+          git push -q --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$BRANCH"
+          cat qa-report.md >> "$GITHUB_STEP_SUMMARY" || true
+          head -c 3000 qa-report.md | while IFS= read -r line; do echo "::notice title=QA ${{ matrix.label }}::${line}"; done | head -12
+
+      - name: Fail the job if the suite failed
+        if: steps.run.outcome == 'failure'
+        run: exit 1
+
+  summary:
+    name: Hebrew summary (Linux, Gemma 4 E4B)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake clang libopenblas-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "llama-helper -> target"
+          key: qa-llama-helper
+      - name: Build llama-helper
+        working-directory: llama-helper
+        run: cargo build --release
+      - name: Cache summary model
+        uses: actions/cache@v4
+        with:
+          path: qa-models/gemma-4-E4B_q4_0-it.gguf
+          key: qa-gemma4-e4b-v1
+      - name: Download Gemma 4 E4B
+        run: |
+          mkdir -p qa-models
+          [ -s qa-models/gemma-4-E4B_q4_0-it.gguf ] || curl -sSL --retry 3 -o qa-models/gemma-4-E4B_q4_0-it.gguf \
+            "https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf/resolve/main/gemma-4-E4B_q4_0-it.gguf"
+          ls -l qa-models
+      - name: Run summary probe
+        id: run
+        continue-on-error: true
+        run: |
+          echo "# Tamlil QA · Hebrew summary · run ${{ github.run_id }} · $(git rev-parse --short HEAD)" > qa-report.md
+          HELPER=$(ls llama-helper/target/release/llama-helper 2>/dev/null || ls target/release/llama-helper)
+          python3 qa/summary_probe.py --helper "$HELPER" --model qa-models/gemma-4-E4B_q4_0-it.gguf \
+            --transcript qa/hebrew_meeting.txt --report qa-report.md --label "Gemma 4 E4B (q4_0, CPU)"
+      - name: Publish report to branch qa/summary-linux
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p /tmp/pub && cp qa-report.md /tmp/pub/report.md
+          cd /tmp/pub && git init -q && git checkout -q -b qa/summary-linux && git add . \
+            && git -c user.name=tamlil-qa -c user.email=qa@users.noreply.github.com commit -q -m "QA report ${{ github.run_id }}"
+          git push -q --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/qa/summary-linux"
+          cat qa-report.md >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Fail the job if the probe failed
+        if: steps.run.outcome == 'failure'
+        run: exit 1

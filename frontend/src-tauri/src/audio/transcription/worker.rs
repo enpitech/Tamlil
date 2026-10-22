@@ -582,40 +582,19 @@ impl LanguageRouter {
     }
 }
 
-/// Run whisper language identification using the active whisper engine, or any
-/// available whisper model when transcription currently runs on Parakeet.
+/// Identify the language of the buffered speech. Delegates to
+/// `language_routing::session::identify_language`, which uses a general whisper
+/// model (never a language-specific fine-tune when a general one is available).
 async fn detect_language_with_available_whisper(
     engine: &TranscriptionEngine,
     audio: &[f32],
     preferred_models: &[String],
 ) -> std::result::Result<(String, f32), String> {
-    if let TranscriptionEngine::Whisper(whisper) = engine {
-        return whisper.detect_language(audio).await.map_err(|e| e.to_string());
-    }
-
-    crate::whisper_engine::commands::whisper_init().await?;
-    let whisper = {
-        let guard = crate::whisper_engine::commands::WHISPER_ENGINE
-            .lock()
-            .map_err(|_| "Whisper engine lock poisoned".to_string())?;
-        guard.as_ref().cloned().ok_or_else(|| "Whisper engine not initialized".to_string())?
+    let whisper = match engine {
+        TranscriptionEngine::Whisper(w) => Some(w),
+        _ => None,
     };
-    if !whisper.is_model_loaded().await {
-        let models = whisper.discover_models().await.map_err(|e| e.to_string())?;
-        let available: Vec<_> = models
-            .iter()
-            .filter(|m| matches!(m.status, crate::whisper_engine::ModelStatus::Available))
-            .collect();
-        // Prefer a model a language route will switch to anyway (saves a second
-        // load); otherwise the smallest available model is plenty for language ID.
-        let candidate = available
-            .iter()
-            .find(|m| preferred_models.iter().any(|p| p == &m.name))
-            .or_else(|| available.iter().min_by_key(|m| m.size_mb))
-            .ok_or_else(|| "No whisper model available for language detection".to_string())?;
-        whisper.load_model(&candidate.name).await.map_err(|e| e.to_string())?;
-    }
-    whisper.detect_language(audio).await.map_err(|e| e.to_string())
+    crate::language_routing::session::identify_language(whisper, audio, preferred_models).await
 }
 
 async fn transcribe_chunk_with_provider<R: Runtime>(

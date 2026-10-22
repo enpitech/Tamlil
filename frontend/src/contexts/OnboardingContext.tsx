@@ -11,6 +11,8 @@ const PARAKEET_MODEL = 'parakeet-tdt-0.6b-v3-int8';
 /** Hebrew whisper model (ivrit.ai); the Hebrew language route points at it. */
 export const HEBREW_WHISPER_MODEL = 'ivrit-large-v3-turbo';
 export const HEBREW_WHISPER_MODEL_MB = 1549;
+/** Small general whisper model used only to identify the spoken language (ivrit cannot). */
+export const LANGUAGE_ID_MODEL = 'base';
 
 interface OnboardingStatus {
   version: string;
@@ -170,6 +172,10 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       await invoke('whisper_download_model', { modelName: HEBREW_WHISPER_MODEL });
       setHebrewWhisperDownloaded(true);
       setHebrewWhisperProgress(100);
+      // Language identification needs a general model; small, best effort
+      invoke('whisper_download_model', { modelName: LANGUAGE_ID_MODEL }).catch((e) =>
+        console.warn('[OnboardingContext] language-id model download failed:', e)
+      );
     } catch (err) {
       const message = String(err);
       if (message.includes('already') && message.includes('progress')) return;
