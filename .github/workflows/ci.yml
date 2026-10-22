@@ -185,9 +185,9 @@ jobs:
           SHORT_SHA="${GITHUB_SHA::7}"
           NOTES="Automated build of \`main\` @ ${SHORT_SHA} (app version ${VERSION}, built $(date -u +'%Y-%m-%d %H:%M UTC')).
 
-These bundles are **unsigned** (ad-hoc on macOS: right-click → Open on first launch, or run \`xattr -dr com.apple.quarantine Tamlil.app\`). They are refreshed on every push to main; use the versioned releases for anything you distribute.
+          These bundles are **unsigned** (ad-hoc on macOS: right-click → Open on first launch, or run \`xattr -dr com.apple.quarantine Tamlil.app\`). They are refreshed on every push to main; use the versioned releases for anything you distribute.
 
-Commit: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
+          Commit: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
 
           # Recreate so the tag follows main and stale assets disappear; the URL
           # releases/tag/latest stays the same.
