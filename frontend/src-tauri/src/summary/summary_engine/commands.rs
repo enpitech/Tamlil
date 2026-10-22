@@ -8,10 +8,16 @@ use tokio::sync::Mutex;
 
 use super::model_manager::{DownloadProgress, ModelInfo, ModelManager};
 
-const QWEN35_4B_RECOMMENDED_RAM_GB: u64 = 14;
+/// Effective floors (reported RAM is a little under the nominal size): 16 GB and 8 GB machines.
+const GEMMA4_12B_RECOMMENDED_RAM_GB: u64 = 14;
+const GEMMA4_E4B_RECOMMENDED_RAM_GB: u64 = 7;
 
 pub(crate) fn summary_model_priority(model_name: &str) -> u8 {
     match model_name {
+        "gemma4:12b" => 8,
+        "dictalm3:12b" => 7,
+        "gemma4:e4b" => 6,
+        "dictalm2:7b" => 5,
         "qwen3.5:4b" => 4,
         "qwen3.5:2b" => 3,
         "gemma3:4b" => 2,
@@ -20,9 +26,13 @@ pub(crate) fn summary_model_priority(model_name: &str) -> u8 {
     }
 }
 
+/// Default summary model by memory. Gemma 4 handles Hebrew and English alike,
+/// so one model serves every language route; tiny machines fall back to Qwen 2B.
 pub(crate) fn recommend_summary_model(_is_macos: bool, system_ram_gb: u64) -> &'static str {
-    if system_ram_gb >= QWEN35_4B_RECOMMENDED_RAM_GB {
-        "qwen3.5:4b"
+    if system_ram_gb >= GEMMA4_12B_RECOMMENDED_RAM_GB {
+        "gemma4:12b"
+    } else if system_ram_gb >= GEMMA4_E4B_RECOMMENDED_RAM_GB {
+        "gemma4:e4b"
     } else {
         "qwen3.5:2b"
     }
@@ -425,15 +435,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn recommended_summary_model_uses_qwen2b_below_effective_16gb_floor() {
-        assert_eq!(recommend_summary_model(true, 13), "qwen3.5:2b");
-        assert_eq!(recommend_summary_model(false, 13), "qwen3.5:2b");
+    fn recommended_summary_model_uses_gemma4_e4b_below_effective_16gb_floor() {
+        assert_eq!(recommend_summary_model(true, 13), "gemma4:e4b");
+        assert_eq!(recommend_summary_model(false, 8), "gemma4:e4b");
+        assert_eq!(recommend_summary_model(false, 4), "qwen3.5:2b");
+        for name in ["gemma4:12b", "gemma4:e4b", "dictalm3:12b", "dictalm2:7b"] {
+            assert!(super::super::models::get_model_by_name(name).is_some(), "{} is built in", name);
+        }
     }
 
     #[test]
-    fn recommended_summary_model_uses_qwen4b_at_effective_16gb_floor() {
-        assert_eq!(recommend_summary_model(true, 14), "qwen3.5:4b");
-        assert_eq!(recommend_summary_model(false, 14), "qwen3.5:4b");
+    fn recommended_summary_model_uses_gemma4_12b_at_effective_16gb_floor() {
+        assert_eq!(recommend_summary_model(true, 14), "gemma4:12b");
+        assert_eq!(recommend_summary_model(false, 14), "gemma4:12b");
     }
 
     #[test]

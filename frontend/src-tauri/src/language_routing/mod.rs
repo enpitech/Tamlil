@@ -24,6 +24,9 @@ use sqlx::SqlitePool;
 pub const SUMMARY_MODE_DIRECT: &str = "direct";
 pub const SUMMARY_MODE_TRANSLATE: &str = "translate";
 
+/// Hebrew whisper model (ivrit.ai) the default `he` route points at.
+pub const HEBREW_WHISPER_MODEL: &str = "ivrit-large-v3-turbo";
+
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, PartialEq, Eq)]
 pub struct LanguageRoute {
     /// BCP-47 / ISO-639-1 code, lower case (`he`, `en`, `pt`).

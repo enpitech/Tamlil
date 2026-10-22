@@ -185,6 +185,17 @@ export function SpeakerChip({
     return (
       <span className="inline-flex items-center gap-1.5 flex-shrink-0 align-middle">
         <SpeakerAvatar index={index} label={label} size={size} />
+        {label !== 'You' && (
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={(e) => { e.stopPropagation(); setEditing(false); if (onRename) onRename('me'); }}
+            className="h-6 rounded border border-gray-300 bg-gray-50 px-1.5 text-xs text-gray-700 hover:bg-gray-100"
+            title="This speaker is me"
+          >
+            It’s me
+          </button>
+        )}
         <input
           autoFocus
           dir="auto"

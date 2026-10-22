@@ -651,6 +651,8 @@ pub fn run() {
             speaker_id::commands::speaker_profiles_rename,
             speaker_id::commands::speaker_profiles_delete,
             speaker_id::commands::speaker_profiles_clear,
+            speaker_id::commands::speaker_id_set_mic_is_me,
+            speaker_id::commands::speaker_profiles_set_me,
             api::api_rename_meeting_speaker,
             whisper_engine::commands::whisper_load_model,
             whisper_engine::commands::whisper_get_current_model,

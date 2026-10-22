@@ -7,7 +7,7 @@ import { configService, ModelConfig } from '@/services/configService';
 import { invoke } from '@tauri-apps/api/core';
 import Analytics from '@/lib/analytics';
 import { BetaFeatures, BetaFeatureKey, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
-import { readSpeakerIdPreference } from '@/components/SpeakerIdSettings';
+import { readSpeakerIdPreference, readMicIsMePreference } from '@/components/SpeakerIdSettings';
 
 export interface OllamaModel {
   name: string;
@@ -220,6 +220,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     const enabled = readSpeakerIdPreference();
     invoke('speaker_id_set_enabled', { enabled }).catch((err) =>
       console.error('[ConfigContext] Failed to sync speaker identification preference:', err)
+    );
+    invoke('speaker_id_set_mic_is_me', { enabled: readMicIsMePreference() }).catch((err) =>
+      console.error('[ConfigContext] Failed to sync the mic-is-me preference:', err)
     );
   }, []);
 

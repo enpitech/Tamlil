@@ -8,6 +8,9 @@ import { resolveOnboardingSummaryModelStatus } from '@/lib/onboarding-summary-mo
 import type { ParakeetDownloadProgressEvent } from '@/lib/parakeet';
 
 const PARAKEET_MODEL = 'parakeet-tdt-0.6b-v3-int8';
+/** Hebrew whisper model (ivrit.ai); the Hebrew language route points at it. */
+export const HEBREW_WHISPER_MODEL = 'ivrit-large-v3-turbo';
+export const HEBREW_WHISPER_MODEL_MB = 1549;
 
 interface OnboardingStatus {
   version: string;
@@ -40,6 +43,9 @@ interface OnboardingContextType {
   parakeetDownloaded: boolean;
   parakeetProgress: number;
   parakeetProgressInfo: ParakeetProgressInfo;
+  hebrewWhisperDownloaded: boolean;
+  hebrewWhisperProgress: number;
+  hebrewWhisperError: string | null;
   summaryModelDownloaded: boolean;
   summaryModelProgress: number;
   summaryModelProgressInfo: SummaryModelProgressInfo;
@@ -56,6 +62,7 @@ interface OnboardingContextType {
   goPrevious: () => void;
   // Setters
   setParakeetDownloaded: (value: boolean) => void;
+  setHebrewWhisperDownloaded: (value: boolean) => void;
   setSummaryModelDownloaded: (value: boolean) => void;
   setSelectedSummaryModel: (value: string) => void;
   setDatabaseExists: (value: boolean) => void;
@@ -64,10 +71,12 @@ interface OnboardingContextType {
   completeOnboarding: () => Promise<void>;
   startBackgroundDownloads: (options: StartBackgroundDownloadsOptions) => Promise<void>;
   retryParakeetDownload: () => Promise<void>;
+  retryHebrewWhisperDownload: () => Promise<void>;
 }
 
 interface StartBackgroundDownloadsOptions {
   includeParakeet: boolean;
+  includeHebrewWhisper?: boolean;
   includeSummary: boolean;
   summaryModel?: string;
 }
@@ -85,6 +94,9 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     totalMb: 0,
     speedMbps: 0,
   });
+  const [hebrewWhisperDownloaded, setHebrewWhisperDownloaded] = useState(false);
+  const [hebrewWhisperProgress, setHebrewWhisperProgress] = useState(0);
+  const [hebrewWhisperError, setHebrewWhisperError] = useState<string | null>(null);
   const [summaryModelDownloaded, setSummaryModelDownloaded] = useState(false);
   const [summaryModelProgress, setSummaryModelProgress] = useState(0);
   const [summaryModelProgressInfo, setSummaryModelProgressInfo] = useState<SummaryModelProgressInfo>({
@@ -133,6 +145,36 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     } catch (error) {
       console.error('[OnboardingContext] Failed to initialize summary model:', error);
       return null;
+    }
+  };
+
+  const checkHebrewWhisperOnDisk = async (): Promise<boolean> => {
+    try {
+      await invoke('whisper_init');
+      const models = await invoke<Array<{ name: string; status: unknown }>>('whisper_get_available_models');
+      const ready = models.some((m) => m.name === HEBREW_WHISPER_MODEL && m.status === 'Available');
+      setHebrewWhisperDownloaded(ready);
+      if (ready) setHebrewWhisperProgress(100);
+      return ready;
+    } catch (error) {
+      console.warn('[OnboardingContext] Failed to check the Hebrew whisper model:', error);
+      return false;
+    }
+  };
+
+  const requestHebrewWhisperDownload = async () => {
+    console.log('[OnboardingContext] Starting Hebrew whisper (ivrit.ai) download');
+    setHebrewWhisperError(null);
+    try {
+      await invoke('whisper_init');
+      await invoke('whisper_download_model', { modelName: HEBREW_WHISPER_MODEL });
+      setHebrewWhisperDownloaded(true);
+      setHebrewWhisperProgress(100);
+    } catch (err) {
+      const message = String(err);
+      if (message.includes('already') && message.includes('progress')) return;
+      console.error('[OnboardingContext] Hebrew whisper download failed:', err);
+      setHebrewWhisperError(message);
     }
   };
 
@@ -295,6 +337,28 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     };
   }, []);
 
+  // Listen to whisper (ivrit.ai) download progress
+  useEffect(() => {
+    const unlistenProgress = listen<{ modelName: string; progress: number }>('model-download-progress', (event) => {
+      if (event.payload.modelName !== HEBREW_WHISPER_MODEL) return;
+      setHebrewWhisperProgress(event.payload.progress);
+    });
+    const unlistenComplete = listen<{ modelName: string }>('model-download-complete', (event) => {
+      if (event.payload.modelName !== HEBREW_WHISPER_MODEL) return;
+      setHebrewWhisperProgress(100);
+      setHebrewWhisperDownloaded(true);
+    });
+    const unlistenError = listen<{ modelName: string; error: string }>('model-download-error', (event) => {
+      if (event.payload.modelName !== HEBREW_WHISPER_MODEL) return;
+      setHebrewWhisperError(event.payload.error);
+    });
+    return () => {
+      unlistenProgress.then((fn) => fn());
+      unlistenComplete.then((fn) => fn());
+      unlistenError.then((fn) => fn());
+    };
+  }, []);
+
   // Listen to summary model (Built-in AI) download progress
   useEffect(() => {
     const unlisten = listen<{
@@ -349,6 +413,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
           setCurrentStep(status.current_step);
           setCompleted(true);
           setParakeetDownloaded(status.model_status.parakeet === 'downloaded');
+          void checkHebrewWhisperOnDisk();
           setSummaryModelDownloaded(status.model_status.summary === 'downloaded');
           if (status.model_status.selected_summary_model) {
             setSelectedSummaryModel(status.model_status.selected_summary_model);
@@ -363,6 +428,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
         setCurrentStep(verifiedStatus.currentStep);
         setCompleted(verifiedStatus.completed);
         setParakeetDownloaded(verifiedStatus.parakeetDownloaded);
+        void checkHebrewWhisperOnDisk();
         setSummaryModelDownloaded(verifiedStatus.summaryModelDownloaded);
         if (verifiedStatus.selectedSummaryModel) {
           setSelectedSummaryModel(verifiedStatus.selectedSummaryModel);
@@ -513,18 +579,25 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
   // Start background downloads for models.
   const startBackgroundDownloads = async ({
     includeParakeet,
+    includeHebrewWhisper = false,
     includeSummary,
     summaryModel,
   }: StartBackgroundDownloadsOptions) => {
     console.log('[OnboardingContext] Starting background downloads:', {
       includeParakeet,
+      includeHebrewWhisper,
       includeSummary,
       summaryModel,
     });
 
     try {
       const shouldStartParakeet = includeParakeet && !parakeetDownloaded;
+      const shouldStartHebrew = includeHebrewWhisper && !hebrewWhisperDownloaded;
       const shouldStartSummary = includeSummary && !summaryModelDownloaded && !!summaryModel;
+
+      if (shouldStartHebrew) {
+        void requestHebrewWhisperDownload();
+      }
 
       if (!shouldStartParakeet && !shouldStartSummary) {
         if (includeSummary && !summaryModelDownloaded && !summaryModel) {
@@ -571,6 +644,12 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     }
   };
 
+  const retryHebrewWhisperDownload = async () => {
+    if (await checkHebrewWhisperOnDisk()) return;
+    setHebrewWhisperProgress(0);
+    await requestHebrewWhisperDownload();
+  };
+
   const retryParakeetDownload = async () => {
     console.log('[OnboardingContext] Retrying Parakeet download');
     try {
@@ -615,6 +694,11 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
         parakeetDownloaded,
         parakeetProgress,
         parakeetProgressInfo,
+        hebrewWhisperDownloaded,
+        hebrewWhisperProgress,
+        hebrewWhisperError,
+        setHebrewWhisperDownloaded,
+        retryHebrewWhisperDownload,
         summaryModelDownloaded,
         summaryModelProgress,
         summaryModelProgressInfo,

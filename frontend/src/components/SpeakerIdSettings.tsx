@@ -11,6 +11,7 @@ import { SpeakerAvatar } from './SpeakerAvatar';
 
 interface SpeakerIdStatus {
   enabled: boolean;
+  mic_is_me: boolean;
   model_available: boolean;
   model_path: string | null;
   model_size_mb: number;
@@ -20,10 +21,22 @@ interface VoiceProfile {
   id: string;
   name: string;
   samples: number;
+  is_me: boolean;
   updated_at: string;
 }
 
 const STORAGE_KEY = 'tamlil.speakerId.enabled';
+const MIC_IS_ME_KEY = 'tamlil.speakerId.micIsMe';
+
+/** "My microphone is only me" preference (default on). */
+export function readMicIsMePreference(): boolean {
+  try {
+    const raw = localStorage.getItem(MIC_IS_ME_KEY);
+    return raw === null ? true : raw === 'true';
+  } catch {
+    return true;
+  }
+}
 
 /** Persisted preference, synced to the backend on startup by ConfigContext-style callers. */
 export function readSpeakerIdPreference(): boolean {
@@ -49,6 +62,27 @@ export function SpeakerIdSettings() {
       setProfiles(list);
     } catch (err) {
       console.error('speaker_id_get_status failed', err);
+    }
+  };
+
+  const setMicIsMe = async (micIsMe: boolean) => {
+    try {
+      await invoke('speaker_id_set_mic_is_me', { enabled: micIsMe });
+      try { localStorage.setItem(MIC_IS_ME_KEY, String(micIsMe)); } catch { /* ignore */ }
+      setStatus((s) => (s ? { ...s, mic_is_me: micIsMe } : s));
+    } catch (err) {
+      toast.error('Could not update the microphone setting', {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  const markMe = async (id: string, isMe: boolean) => {
+    try {
+      await invoke('speaker_profiles_set_me', { id, isMe });
+      setProfiles((p) => p.map((v) => ({ ...v, is_me: v.id === id ? isMe : isMe ? false : v.is_me })));
+    } catch (err) {
+      toast.error('Could not update the voice', { description: err instanceof Error ? err.message : String(err) });
     }
   };
 
@@ -140,9 +174,8 @@ export function SpeakerIdSettings() {
             <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">beta</span>
           </div>
           <p className="mt-1 text-xs text-gray-600">
-            Tells voices apart by their sound and gives each one an avatar in the transcript. Your microphone
-            is “You”; voices from the call become Speaker 1, 2, … Runs on this device with a small
-            ({status.model_size_mb} MB) model; nothing is stored about voices between meetings.
+            Tells voices apart by their sound and gives each one an avatar in the transcript. Runs on this
+            device with a small ({status.model_size_mb} MB) model; only voices you name are stored.
           </p>
         </div>
         <Switch
@@ -174,6 +207,23 @@ export function SpeakerIdSettings() {
         </div>
       )}
 
+      <div className="flex items-start justify-between gap-3 border-t border-gray-100 pt-3">
+        <div className="min-w-0">
+          <h5 className="text-xs font-semibold text-gray-800">My microphone is only me</h5>
+          <p className="mt-1 text-xs text-gray-500">
+            The first voice on your microphone is labelled “You”. Switch off when others share the mic, for
+            example a phone on speaker or a meeting room; every voice is then numbered until you name it.
+            Marking a remembered voice as yours below makes this setting unnecessary.
+          </p>
+        </div>
+        <Switch
+          checked={status.mic_is_me}
+          onCheckedChange={setMicIsMe}
+          disabled={!status.model_available}
+          aria-label="My microphone is only me"
+        />
+      </div>
+
       <div className="border-t border-gray-100 pt-3">
         <div className="flex items-center justify-between">
           <h5 className="text-xs font-semibold text-gray-800">Remembered voices</h5>
@@ -185,25 +235,38 @@ export function SpeakerIdSettings() {
         </div>
         <p className="mt-1 text-xs text-gray-500">
           Click a speaker’s name in a transcript to name them. Their voice is then saved to a local file on this
-          device and recognised in future meetings. Nothing is uploaded.
+          device and recognised in future meetings. Name a speaker “me” (or use the “It’s me” button) to mark your
+          own voice: it is labelled “You” wherever it is heard. Nothing is uploaded.
         </p>
         {profiles.length > 0 && (
           <ul className="mt-2 divide-y divide-gray-100 rounded-md border border-gray-100">
             {profiles.map((p, i) => (
               <li key={p.id} className="flex items-center justify-between gap-2 px-2 py-1.5 text-xs">
                 <span className="flex items-center gap-2 min-w-0">
-                  <SpeakerAvatar index={i + 1} label={p.name} size={20} />
+                  <SpeakerAvatar index={p.is_me ? 0 : i + 1} label={p.name} size={20} />
                   <span className="truncate font-medium text-gray-800" dir="auto">{p.name}</span>
+                  {p.is_me && (
+                    <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800">You</span>
+                  )}
                   <span className="text-gray-400">{p.samples} clip{p.samples === 1 ? '' : 's'}</span>
                 </span>
-                <button
-                  type="button"
-                  className="text-gray-400 hover:text-red-600"
-                  title="Forget this voice"
-                  onClick={() => forgetVoice(p.id, p.name)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                <span className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    className="text-gray-400 hover:text-gray-800"
+                    onClick={() => markMe(p.id, !p.is_me)}
+                  >
+                    {p.is_me ? 'Not me' : 'This is me'}
+                  </button>
+                  <button
+                    type="button"
+                    className="text-gray-400 hover:text-red-600"
+                    title="Forget this voice"
+                    onClick={() => forgetVoice(p.id, p.name)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </span>
               </li>
             ))}
           </ul>

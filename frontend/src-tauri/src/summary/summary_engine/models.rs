@@ -165,6 +165,32 @@ pub struct ModelDef {
 /// from the model registry (user-added URLs, imported files, discovered files).
 pub fn builtin_models() -> Vec<ModelDef> {
     vec![
+        // Gemma 4 (Google, 2026): strong in Hebrew and English alike, so one model
+        // serves every language. Official QAT q4_0 files; chat template from the GGUF.
+        ModelDef {
+            name: "gemma4:12b".to_string(),
+            display_name: "Gemma 4 12B (Best quality)".to_string(),
+            gguf_file: "gemma-4-12b-it-qat-q4_0.gguf".to_string(),
+            template: AUTO_TEMPLATE.to_string(),
+            download_url: "https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-gguf/resolve/main/gemma-4-12b-it-qat-q4_0.gguf".to_string(),
+            size_mb: 6653,
+            context_size: 32768,
+            layer_count: 48,
+            sampling: SamplingParams::gemma3_instruct(vec!["<end_of_turn>".to_string()]),
+            description: "Google Gemma 4 12B. Excellent Hebrew and English summaries. Needs ~9 GB free RAM.".to_string(),
+        },
+        ModelDef {
+            name: "gemma4:e4b".to_string(),
+            display_name: "Gemma 4 E4B (Balanced)".to_string(),
+            gguf_file: "gemma-4-E4B_q4_0-it.gguf".to_string(),
+            template: AUTO_TEMPLATE.to_string(),
+            download_url: "https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf/resolve/main/gemma-4-E4B_q4_0-it.gguf".to_string(),
+            size_mb: 4916,
+            context_size: 32768,
+            layer_count: 42,
+            sampling: SamplingParams::gemma3_instruct(vec!["<end_of_turn>".to_string()]),
+            description: "Google Gemma 4 E4B. Good Hebrew and English summaries with ~5 GB free RAM.".to_string(),
+        },
         // Qwen 3.5 2B - Balanced tier
         ModelDef {
             name: "qwen3.5:2b".to_string(),
@@ -190,6 +216,33 @@ pub fn builtin_models() -> Vec<ModelDef> {
             layer_count: 32,
             sampling: SamplingParams::qwen35_summary(vec!["<|im_end|>".to_string()]),
             description: "High-quality Qwen 3.5 model for built-in summaries. Best local Qwen option in the current lineup.".to_string(),
+        },
+        // DictaLM 3.0 (Dicta, Hebrew-first). Nemotron 12B instruct: best Hebrew
+        // summaries that still run on a 16 GB machine. Template comes from the GGUF.
+        ModelDef {
+            name: "dictalm3:12b".to_string(),
+            display_name: "DictaLM 3.0 12B (Hebrew, best quality)".to_string(),
+            gguf_file: "DictaLM-3.0-Nemotron-12B-Instruct-Q4_K_M.gguf".to_string(),
+            template: AUTO_TEMPLATE.to_string(),
+            download_url: "https://huggingface.co/dicta-il/DictaLM-3.0-Nemotron-12B-Instruct-GGUF/resolve/main/DictaLM-3.0-Nemotron-12B-Instruct-Q4_K_M.gguf".to_string(),
+            size_mb: 7147,
+            context_size: 32768,
+            layer_count: 40,
+            sampling: SamplingParams::tight_structured(vec!["</s>".to_string()]),
+            description: "Hebrew-first model by Dicta (NVIDIA Nemotron 12B base). Best Hebrew summaries; needs ~9 GB free RAM.".to_string(),
+        },
+        // DictaLM 2.0 (Mistral 7B base): Hebrew option for machines with less memory.
+        ModelDef {
+            name: "dictalm2:7b".to_string(),
+            display_name: "DictaLM 2.0 7B (Hebrew)".to_string(),
+            gguf_file: "dictalm2.0-instruct.Q4_K_M.gguf".to_string(),
+            template: AUTO_TEMPLATE.to_string(),
+            download_url: "https://huggingface.co/dicta-il/dictalm2.0-instruct-GGUF/resolve/main/dictalm2.0-instruct.Q4_K_M.gguf".to_string(),
+            size_mb: 4173,
+            context_size: 8192,
+            layer_count: 32,
+            sampling: SamplingParams::tight_structured(vec!["</s>".to_string()]),
+            description: "Hebrew-first model by Dicta (Mistral 7B base). Good Hebrew summaries with ~5 GB free RAM.".to_string(),
         },
         // Gemma 3 4B - Legacy alternative retained for users who prefer Gemma output.
         ModelDef {

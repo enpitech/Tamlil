@@ -8,6 +8,8 @@ use tauri::{AppHandle, Emitter, Runtime};
 #[derive(Debug, Serialize)]
 pub struct SpeakerIdStatus {
     pub enabled: bool,
+    /// "My microphone is only me" setting.
+    pub mic_is_me: bool,
     pub model_available: bool,
     pub model_path: Option<String>,
     pub model_size_mb: u64,
@@ -17,6 +19,7 @@ pub struct SpeakerIdStatus {
 pub async fn speaker_id_get_status() -> Result<SpeakerIdStatus, String> {
     Ok(SpeakerIdStatus {
         enabled: super::is_enabled(),
+        mic_is_me: super::mic_is_me(),
         model_available: super::model_is_available(),
         model_path: super::model_path().map(|p| p.to_string_lossy().to_string()),
         model_size_mb: super::MODEL_BYTES / (1024 * 1024),
@@ -27,6 +30,16 @@ pub async fn speaker_id_get_status() -> Result<SpeakerIdStatus, String> {
 pub async fn speaker_id_set_enabled(enabled: bool) -> Result<(), String> {
     super::set_enabled(enabled);
     log::info!("Speaker identification {}", if enabled { "enabled" } else { "disabled" });
+    Ok(())
+}
+
+/// "My microphone is only me": label the first microphone voice "You". Off when
+/// other people share the mic (phone on speaker, meeting room). Applies from
+/// the next recording.
+#[tauri::command]
+pub async fn speaker_id_set_mic_is_me(enabled: bool) -> Result<(), String> {
+    super::set_mic_is_me(enabled);
+    log::info!("Speaker identification: mic is me = {}", enabled);
     Ok(())
 }
 
@@ -119,13 +132,34 @@ pub async fn speaker_profiles_list() -> Result<Vec<super::profiles::VoiceProfile
 }
 
 #[tauri::command]
-pub async fn speaker_profiles_rename(id: String, name: String) -> Result<(), String> {
-    super::profiles::with_mut(|s| s.rename(&id, &name)).map_err(|e| e.to_string())
+pub async fn speaker_profiles_rename<R: Runtime>(app: AppHandle<R>, id: String, name: String) -> Result<(), String> {
+    super::profiles::with_mut(|s| s.rename(&id, &name)).map_err(|e| e.to_string())?;
+    let profile = super::profiles::with(|s| s.get(&id).cloned()).flatten();
+    if let Some(profile) = profile {
+        for label in super::relabel_profile(&id, Some(&super::profile_label(&profile))) {
+            let _ = app.emit("speaker-renamed", &label);
+        }
+    }
+    Ok(())
+}
+
+/// Mark a remembered voice as the user's own ("You" in transcripts), or unmark it.
+#[tauri::command]
+pub async fn speaker_profiles_set_me<R: Runtime>(app: AppHandle<R>, id: String, is_me: bool) -> Result<(), String> {
+    let profile = super::profiles::with_mut(|s| s.set_me(&id, is_me)).map_err(|e| e.to_string())?;
+    for label in super::relabel_profile(&id, Some(&super::profile_label(&profile))) {
+        let _ = app.emit("speaker-renamed", &label);
+    }
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn speaker_profiles_delete(id: String) -> Result<(), String> {
-    super::profiles::with_mut(|s| s.delete(&id)).map_err(|e| e.to_string())
+pub async fn speaker_profiles_delete<R: Runtime>(app: AppHandle<R>, id: String) -> Result<(), String> {
+    super::profiles::with_mut(|s| s.delete(&id)).map_err(|e| e.to_string())?;
+    for label in super::relabel_profile(&id, None) {
+        let _ = app.emit("speaker-renamed", &label);
+    }
+    Ok(())
 }
 
 #[tauri::command]

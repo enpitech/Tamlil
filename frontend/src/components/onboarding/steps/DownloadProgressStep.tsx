@@ -1,16 +1,18 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Mic, Sparkles, Check, Loader2, Download } from 'lucide-react';
+import { Mic, Sparkles, Check, Loader2, Download, Languages } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';
+import { HEBREW_WHISPER_MODEL_MB } from '@/contexts/OnboardingContext';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getSummaryModelSizeLabel, getSummaryModelSizeMb } from '@/lib/onboarding-summary-model';
 import type { ParakeetDownloadProgressEvent } from '@/lib/parakeet';
 
 const PARAKEET_MODEL = 'parakeet-tdt-0.6b-v3-int8';
+const HEBREW_CARD_TITLE = 'Hebrew Transcription';
 
 type DownloadStatus = 'waiting' | 'downloading' | 'completed' | 'cancelled' | 'error';
 
@@ -30,6 +32,10 @@ export function DownloadProgressStep() {
     recommendedSummaryModel,
     parakeetDownloaded,
     setParakeetDownloaded,
+    hebrewWhisperDownloaded,
+    hebrewWhisperProgress,
+    hebrewWhisperError,
+    retryHebrewWhisperDownload,
     summaryModelDownloaded,
     setSummaryModelDownloaded,
     startBackgroundDownloads,
@@ -176,6 +182,7 @@ export function DownloadProgressStep() {
 
     startBackgroundDownloads({
       includeParakeet: true,
+      includeHebrewWhisper: true,
       includeSummary: false,
     }).catch((error) => {
       console.error('Failed to start Parakeet download:', error);
@@ -399,6 +406,31 @@ export function DownloadProgressStep() {
     }
   };
 
+  const hebrewState: DownloadState = {
+    status: hebrewWhisperDownloaded
+      ? 'completed'
+      : hebrewWhisperError
+      ? 'error'
+      : hebrewWhisperProgress > 0
+      ? 'downloading'
+      : 'downloading',
+    progress: hebrewWhisperDownloaded ? 100 : hebrewWhisperProgress,
+    downloadedMb: (HEBREW_WHISPER_MODEL_MB * (hebrewWhisperDownloaded ? 100 : hebrewWhisperProgress)) / 100,
+    totalMb: HEBREW_WHISPER_MODEL_MB,
+    speedMbps: 0,
+    error: hebrewWhisperError ?? undefined,
+  };
+
+  const handleRetryHebrewDownload = async () => {
+    try {
+      await retryHebrewWhisperDownload();
+    } catch (error) {
+      toast.error('Download retry failed', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
   const renderDownloadCard = (
     title: string,
     icon: React.ReactNode,
@@ -471,9 +503,15 @@ export function DownloadProgressStep() {
             {state.status === 'cancelled' ? 'Download cancelled' : 'Download Error'}
           </p>
           {state.error && <p className="text-xs text-red-500 mt-1">{state.error}</p>}
-          {(title === 'Transcription Engine' || title === 'Summary Engine') && (
+          {(title === 'Transcription Engine' || title === 'Summary Engine' || title === HEBREW_CARD_TITLE) && (
             <button
-              onClick={title === 'Transcription Engine' ? handleRetryDownload : handleRetrySummaryDownload}
+              onClick={
+                title === 'Transcription Engine'
+                  ? handleRetryDownload
+                  : title === HEBREW_CARD_TITLE
+                  ? handleRetryHebrewDownload
+                  : handleRetrySummaryDownload
+              }
               className="mt-3 w-full h-9 px-4 bg-gray-900 hover:bg-gray-800 text-white text-sm font-medium rounded-md transition-colors flex items-center justify-center gap-2"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -491,7 +529,7 @@ export function DownloadProgressStep() {
   return (
     <OnboardingContainer
       title="Getting things ready"
-      description="You can start using Tamlil after downloading the Transcription Engine."
+      description="You can start using Tamlil after downloading the Transcription Engine. Hebrew meetings need the Hebrew engine as well; it keeps downloading in the background."
       step={3}
       totalSteps={isMac ? 4 : 3}
     >
@@ -503,6 +541,13 @@ export function DownloadProgressStep() {
             <Mic className="w-5 h-5 text-gray-600" />,
             parakeetState,
             '~670 MB'
+          )}
+
+          {renderDownloadCard(
+            HEBREW_CARD_TITLE,
+            <Languages className="w-5 h-5 text-gray-600" />,
+            hebrewState,
+            '~1.5 GB · ivrit.ai'
           )}
 
           {renderDownloadCard(

@@ -34,6 +34,11 @@ export function SetupOverviewStep() {
     },
     {
       number: 2,
+      type: 'hebrew',
+      title: 'Download Hebrew Transcription (ivrit.ai)',
+    },
+    {
+      number: 3,
       type: 'summarization',
       title: 'Download Summarization Engine',
     },
@@ -46,7 +51,7 @@ export function SetupOverviewStep() {
   return (
     <OnboardingContainer
       title="Setup Overview"
-      description="Tamlil requires that you download the Transcription & Summarization AI models for the software to work."
+      description="Tamlil downloads the transcription and summarization models once; everything runs on this computer afterwards. The summarization model is chosen for your memory and handles Hebrew and English."
       step={2}
       totalSteps={isMac ? 4 : 3}
     >

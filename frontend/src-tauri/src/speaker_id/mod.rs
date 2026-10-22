@@ -3,11 +3,15 @@
 //! Every VAD speech chunk is turned into a speaker embedding with a small
 //! WeSpeaker CAM++ model (ONNX, runs on CPU in a few milliseconds) and matched
 //! against the speakers heard so far in the recording by cosine similarity.
-//! New voices get the next free label. The microphone channel is the local
-//! user, so its first voice is labelled "You"; voices on the system-audio
-//! channel become "Speaker 1", "Speaker 2", ...
+//! New voices get the next free label: "Speaker 1", "Speaker 2", ...
 //!
-//! Labels are per recording; nothing is stored about voices across meetings.
+//! Who is "You": when the user has marked a remembered voice as their own
+//! (`profiles::VoiceProfile::is_me`) that voice is "You" wherever it is heard.
+//! Otherwise, while the "my microphone is only me" setting is on (default),
+//! the first voice on the microphone channel is assumed to be the user. Turn
+//! it off when other people share the mic (a phone on speaker, a meeting room).
+//!
+//! Labels are per recording; only voices the user names are stored.
 
 pub mod commands;
 pub mod fbank;
@@ -49,6 +53,9 @@ const PROFILE_RECHECK_AT: &[u32] = &[3, 6, 12];
 
 static MODELS_DIR: OnceLock<PathBuf> = OnceLock::new();
 static ENABLED: AtomicBool = AtomicBool::new(true);
+/// "My microphone is only me": the first mic voice is "You" unless a remembered
+/// voice is marked as the user.
+static MIC_IS_ME: AtomicBool = AtomicBool::new(true);
 static ENGINE: Mutex<Option<Arc<SpeakerEngine>>> = Mutex::new(None);
 static TRACKER: Mutex<Option<SpeakerTracker>> = Mutex::new(None);
 
@@ -77,11 +84,56 @@ pub fn name_speaker(index: u32, name: &str) -> Result<SpeakerLabel> {
         .get(index as usize)
         .cloned()
         .ok_or_else(|| anyhow!("Speaker {} not found in the current recording", index))?;
-    let profile = profiles::with_mut(|store| store.upsert_named(name, &speaker.centroid, speaker.count))?;
+    let profile = if profiles::is_me_alias(name) {
+        profiles::with_mut(|store| store.upsert_me(&speaker.centroid, speaker.count))?
+    } else {
+        profiles::with_mut(|store| store.upsert_named(name, &speaker.centroid, speaker.count))?
+    };
+    let label = profile_label(&profile);
     let speaker = &mut tracker.speakers[index as usize];
-    speaker.label = profile.name.clone();
+    speaker.label = label.clone();
     speaker.profile_id = Some(profile.id);
-    Ok(SpeakerLabel { index, label: speaker.label.clone(), confidence: 1.0, relabeled: true })
+    if label == "You" {
+        tracker.has_you = true;
+    }
+    Ok(SpeakerLabel { index, label, confidence: 1.0, relabeled: true })
+}
+
+/// Apply a profile change (renamed, marked as "me", deleted) to the speakers of
+/// the current recording. Returns the labels that changed.
+pub fn relabel_profile(profile_id: &str, new_label: Option<&str>) -> Vec<SpeakerLabel> {
+    let mut changed = Vec::new();
+    if let Ok(mut guard) = TRACKER.lock() {
+        if let Some(tracker) = guard.as_mut() {
+            for (i, speaker) in tracker.speakers.iter_mut().enumerate() {
+                if speaker.profile_id.as_deref() != Some(profile_id) {
+                    continue;
+                }
+                let label = match new_label {
+                    Some(l) => l.to_string(),
+                    None => {
+                        speaker.profile_id = None;
+                        tracker.remote_count += 1;
+                        format!("Speaker {}", tracker.remote_count)
+                    }
+                };
+                if speaker.label != label {
+                    speaker.label = label.clone();
+                    changed.push(SpeakerLabel { index: i as u32, label, confidence: 1.0, relabeled: true });
+                }
+            }
+        }
+    }
+    changed
+}
+
+/// Transcript label for a remembered voice: the user's own voice is "You".
+pub fn profile_label(profile: &profiles::VoiceProfile) -> String {
+    if profile.is_me {
+        "You".to_string()
+    } else {
+        profile.name.clone()
+    }
 }
 
 /// Current label of every speaker in the recording.
@@ -124,6 +176,14 @@ pub fn is_enabled() -> bool {
     ENABLED.load(Ordering::SeqCst)
 }
 
+pub fn set_mic_is_me(value: bool) {
+    MIC_IS_ME.store(value, Ordering::SeqCst);
+}
+
+pub fn mic_is_me() -> bool {
+    MIC_IS_ME.load(Ordering::SeqCst)
+}
+
 /// Enabled by the user and the model is on disk.
 pub fn is_active() -> bool {
     is_enabled() && model_is_available()
@@ -132,7 +192,7 @@ pub fn is_active() -> bool {
 /// Forget all speakers (call at the start of every recording).
 pub fn reset_session() {
     if let Ok(mut guard) = TRACKER.lock() {
-        *guard = Some(SpeakerTracker::default());
+        *guard = Some(SpeakerTracker::for_session());
     }
 }
 
@@ -183,7 +243,7 @@ pub fn identify(audio_16k: &[f32], device: DeviceType) -> Option<SpeakerLabel> {
     };
     let seconds = audio_16k.len() as f32 / fbank::SAMPLE_RATE as f32;
     let mut guard = TRACKER.lock().ok()?;
-    let tracker = guard.get_or_insert_with(SpeakerTracker::default);
+    let tracker = guard.get_or_insert_with(SpeakerTracker::for_session);
     Some(tracker.assign(&embedding, device, seconds))
 }
 
@@ -301,12 +361,20 @@ fn remembered_voice(embedding: &[f32]) -> Option<profiles::VoiceProfile> {
         .map(|(p, _)| p)
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SpeakerTracker {
     speakers: Vec<Speaker>,
     last_index: Option<usize>,
     remote_count: u32,
     has_you: bool,
+    /// Label the first microphone voice "You" (no remembered "me" voice to rely on).
+    guess_you: bool,
+}
+
+impl Default for SpeakerTracker {
+    fn default() -> Self {
+        Self { speakers: Vec::new(), last_index: None, remote_count: 0, has_you: false, guess_you: true }
+    }
 }
 
 fn cosine(a: &[f32], b: &[f32]) -> f32 {
@@ -314,6 +382,18 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
 }
 
 impl SpeakerTracker {
+    /// Tracker for a new recording, honouring the "mic is me" setting. When a
+    /// remembered voice is marked as the user, that voice decides who "You" is
+    /// and the microphone guess is skipped.
+    pub fn for_session() -> Self {
+        let has_me = profiles::with(|store| store.has_me()).unwrap_or(false);
+        Self { guess_you: mic_is_me() && !has_me, ..Self::default() }
+    }
+
+    pub fn with_mic_guess(guess_you: bool) -> Self {
+        Self { guess_you, ..Self::default() }
+    }
+
     pub fn assign(&mut self, embedding: &[f32], device: DeviceType, seconds: f32) -> SpeakerLabel {
         let best = self
             .speakers
@@ -348,8 +428,12 @@ impl SpeakerTracker {
         let remembered = remembered_voice(embedding)
             .filter(|p| !self.speakers.iter().any(|s| s.profile_id.as_deref() == Some(p.id.as_str())));
         let (label, profile_id) = if let Some(profile) = remembered {
-            (profile.name, Some(profile.id))
-        } else if device == DeviceType::Microphone && !self.has_you {
+            let label = profile_label(&profile);
+            if label == "You" {
+                self.has_you = true;
+            }
+            (label, Some(profile.id))
+        } else if self.guess_you && device == DeviceType::Microphone && !self.has_you {
             self.has_you = true;
             ("You".to_string(), None)
         } else {
@@ -380,11 +464,15 @@ impl SpeakerTracker {
         if self.speakers.iter().any(|s| s.profile_id.as_deref() == Some(profile.id.as_str())) {
             return false;
         }
+        let label = profile_label(&profile);
         let speaker = &mut self.speakers[idx];
-        if speaker.label == "You" {
+        if speaker.label == "You" && label != "You" {
             self.has_you = false;
         }
-        speaker.label = profile.name;
+        if label == "You" {
+            self.has_you = true;
+        }
+        speaker.label = label;
         speaker.profile_id = Some(profile.id);
         true
     }
@@ -448,6 +536,33 @@ mod tests {
         let d = unit(&[0.0, 0.0, 0.0, 1.0]);
         let second_mic = t.assign(&d, DeviceType::Microphone, 3.0);
         assert_eq!(second_mic.label, "Speaker 2");
+    }
+
+    #[test]
+    fn mic_guess_off_numbers_every_voice() {
+        let mut t = SpeakerTracker::with_mic_guess(false);
+        let a = unit(&[1.0, 0.0, 0.0]);
+        let b = unit(&[0.0, 1.0, 0.0]);
+        assert_eq!(t.assign(&a, DeviceType::Microphone, 3.0).label, "Speaker 1");
+        assert_eq!(t.assign(&b, DeviceType::Microphone, 3.0).label, "Speaker 2");
+        assert_eq!(t.assign(&a, DeviceType::Microphone, 3.0).index, 0);
+    }
+
+    #[test]
+    fn me_profile_label_is_you() {
+        let p = profiles::VoiceProfile {
+            id: "x".into(),
+            name: "Liran".into(),
+            embedding: vec![1.0],
+            samples: 1,
+            is_me: true,
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        assert_eq!(profile_label(&p), "You");
+        assert!(profiles::is_me_alias(" Me "));
+        assert!(profiles::is_me_alias("אני"));
+        assert!(!profiles::is_me_alias("Dana"));
     }
 
     #[test]
