@@ -634,8 +634,30 @@ jobs:
           } >> "$GITHUB_ENV"
           echo "::warning::No TAURI_SIGNING_PRIVATE_KEY secret; bundles are signed with a throwaway key and cannot be used as auto-updates."
 
+      # CI builds (no release) on macOS/Linux run the Tauri CLI directly so that
+      # compiler and bundler errors are surfaced as annotations. Releases and
+      # Windows keep using tauri-action (release upload, portable config).
+      - name: Build with Tauri (CI diagnostics)
+        if: ${{ inputs.release-id == '' && !contains(inputs.platform, 'windows') }}
+        shell: bash
+        working-directory: frontend
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ inputs.sign-binaries && env.CERT_ID || '' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || env.CI_TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+        run: |
+          set -o pipefail
+          LOG="$RUNNER_TEMP/tauri-build.log"
+          if ! pnpm tauri build ${{ inputs.build-args }} ${{ steps.build-features.outputs.features }} 2>&1 | tee "$LOG"; then
+            grep -nE '^error(\[|:)|^\s+--> |^\s+= note: |failed to |Error: |error: ' "$LOG" | grep -viE 'warning|note: `#\[warn' | head -60 | while IFS= read -r line; do
+              echo "::error title=tauri build::${line}"
+            done
+            exit 1
+          fi
+
       - name: Build with Tauri
         id: tauri-build
+        if: ${{ inputs.release-id != '' || contains(inputs.platform, 'windows') }}
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
