@@ -60,7 +60,7 @@ def collect(lang, want_per_gender, out_dir, cache_dir):
             if not meta or meta["gender"] not in taken or taken[meta["gender"]] >= want_per_gender:
                 continue
             data = tar.extractfile(member).read()
-            out_path = os.path.join(out_dir, f"{lang}-{meta['id']}.f32")
+            out_path = os.path.abspath(os.path.join(out_dir, f"{lang}-{meta['id']}.f32"))
             seconds = to_f32(data, out_path)
             if seconds < 3.0 or seconds > 20.0:
                 os.remove(out_path)

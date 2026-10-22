@@ -362,18 +362,25 @@ impl ModelState {
         use llama_cpp_2::model::{LlamaChatMessage, LlamaChatTemplate};
 
         let model = self.model.as_ref().context("Model not loaded")?;
-        let template = match model.chat_template(None) {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("⚠️ GGUF has no chat template ({}), falling back to chatml", e);
-                LlamaChatTemplate::new("chatml").context("invalid fallback template")?
-            }
-        };
         let chat: Vec<LlamaChatMessage> = messages
             .iter()
             .map(|m| LlamaChatMessage::new(m.role.clone(), m.content.clone()))
             .collect::<Result<_, _>>()
             .context("chat message contains a NUL byte")?;
+
+        // llama.cpp does not run Jinja: it recognises known templates by their
+        // markers and rejects anything else (Gemma 4's template, for example).
+        // Read the embedded template to pick the matching built-in family.
+        let embedded = model.chat_template(None).ok();
+        let source = embedded.as_ref().and_then(|t| t.to_string().ok()).unwrap_or_default();
+        if let Some(t) = embedded.as_ref() {
+            if let Ok(formatted) = model.apply_chat_template(t, &chat, true) {
+                return Ok(formatted);
+            }
+        }
+        let family = builtin_template_for(&source);
+        eprintln!("⚠️ Embedded chat template unusable, falling back to the built-in '{}' template", family);
+        let template = LlamaChatTemplate::new(family).context("invalid fallback template")?;
         let formatted = model
             .apply_chat_template(&template, &chat, true)
             .context("failed to apply the model's chat template")?;
@@ -580,6 +587,24 @@ fn send_response(response: &Response) -> Result<()> {
     Ok(())
 }
 
+/// Built-in llama.cpp template name that matches the markers of an embedded
+/// (Jinja) template llama.cpp could not apply.
+fn builtin_template_for(source: &str) -> &'static str {
+    if source.contains("<start_of_turn>") {
+        "gemma"
+    } else if source.contains("<|im_start|>") {
+        "chatml"
+    } else if source.contains("[INST]") {
+        "mistral-v1"
+    } else if source.contains("<|start_header_id|>") {
+        "llama3"
+    } else if source.contains("<|user|>") && source.contains("<|assistant|>") {
+        "zephyr"
+    } else {
+        "chatml"
+    }
+}
+
 fn main() -> Result<()> {
     // Get idle timeout from environment variable (default 5 minutes)
     let idle_timeout_secs = std::env::var("LLAMA_IDLE_TIMEOUT")
@@ -727,6 +752,14 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fallback_template_family_from_markers() {
+        assert_eq!(builtin_template_for("{{ bos }}<start_of_turn>user ..."), "gemma");
+        assert_eq!(builtin_template_for("<|im_start|>system"), "chatml");
+        assert_eq!(builtin_template_for("[INST] {{ x }} [/INST]"), "mistral-v1");
+        assert_eq!(builtin_template_for(""), "chatml");
+    }
 
     #[test]
     fn generate_request_defaults_penalties_when_omitted() {

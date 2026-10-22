@@ -171,7 +171,7 @@ pub fn builtin_models() -> Vec<ModelDef> {
             name: "gemma4:12b".to_string(),
             display_name: "Gemma 4 12B (Best quality, 16 GB RAM)".to_string(),
             gguf_file: "gemma-4-12b-it-qat-q4_0.gguf".to_string(),
-            template: AUTO_TEMPLATE.to_string(),
+            template: "gemma3".to_string(), // Gemma 4 keeps the Gemma 3 turn format
             download_url: "https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-gguf/resolve/main/gemma-4-12b-it-qat-q4_0.gguf".to_string(),
             size_mb: 6653,
             context_size: 32768,
@@ -183,7 +183,7 @@ pub fn builtin_models() -> Vec<ModelDef> {
             name: "gemma4:e4b".to_string(),
             display_name: "Gemma 4 E4B (Recommended)".to_string(),
             gguf_file: "gemma-4-E4B_q4_0-it.gguf".to_string(),
-            template: AUTO_TEMPLATE.to_string(),
+            template: "gemma3".to_string(), // Gemma 4 keeps the Gemma 3 turn format
             download_url: "https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf/resolve/main/gemma-4-E4B_q4_0-it.gguf".to_string(),
             size_mb: 4916,
             context_size: 32768,

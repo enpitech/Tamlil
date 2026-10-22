@@ -435,3 +435,21 @@ async fn qa_dump_speaker_embeddings() {
     fs::write(&out, format!("{{{}}}", entries.join(",\n"))).unwrap();
     report(&format!("- Wrote {} embeddings to `{}`", entries.len(), out.display()));
 }
+
+/// Dump raw fbank features of the first clip (frame count + first frames) to
+/// compare with the Kaldi reference (qa/embed_reference.py --fbank).
+#[tokio::test]
+#[ignore]
+async fn qa_dump_fbank() {
+    let clips = load_clips();
+    let clip = &clips[0];
+    let feats = app_lib::speaker_id::fbank::compute_fbank(&clip.audio).expect("fbank");
+    let out = env_path("TAMLIL_QA_DATA").unwrap().join("fbank-rust.json");
+    let rows: Vec<String> = feats
+        .iter()
+        .take(4)
+        .map(|f| format!("[{}]", f.iter().map(|v| format!("{:.5}", v)).collect::<Vec<_>>().join(",")))
+        .collect();
+    fs::write(&out, format!("{{\"clip\": \"{}/{}\", \"frames\": {}, \"samples\": {}, \"first\": [{}]}}", clip.lang, clip.id, feats.len(), clip.audio.len(), rows.join(","))).unwrap();
+    report(&format!("- Wrote fbank of {}/{} ({} frames) to `{}`", clip.lang, clip.id, feats.len(), out.display()));
+}
