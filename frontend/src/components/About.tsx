@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import { invoke } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import Image from 'next/image';
-import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch";
 import { UpdateDialog } from "./UpdateDialog";
 import { updateService, UpdateInfo } from '@/services/updateService';
 import { Button } from './ui/button';
@@ -140,10 +139,9 @@ export function About() {
             {/* Footer - Compact */}
             <div className="pt-2 border-t border-gray-200 text-center">
                 <p className="text-xs text-gray-400">
-                    Built by Zackriya Solutions
+                    Tamlil by Enpitech, built on Meetily by Zackriya Solutions
                 </p>
             </div>
-            <AnalyticsConsentSwitch />
 
             {/* Update Dialog */}
             <UpdateDialog

@@ -11,7 +11,7 @@ Tamlil is a fork of [Meetily](https://github.com/Zackriya-Solutions/meeting-minu
 - **Per-language model routing.** In *Settings → Language*, map a language to the transcription model and the summary model that work best for it. With the transcription language on *Auto Detect*, the first seconds of speech are identified and the routed models take over for the rest of the meeting.
 - **Summaries written directly in the meeting language.** Routed languages skip the upstream English-then-translate pipeline.
 - **Right-to-left text.** Transcript lines, meeting titles and the summary editor resolve their direction per paragraph, so Hebrew and mixed Hebrew/English content reads correctly.
-- **No telemetry by default.** The PostHog key is not shipped; set `TAMLIL_POSTHOG_KEY` at build time if you run your own instance.
+- **No telemetry.** The upstream PostHog analytics (Rust client, consent UI and event tracking) are removed. The app only talks to the network to download models and to the AI providers you configure.
 
 ## Building
 
@@ -25,6 +25,25 @@ pnpm install
 ```
 
 Model downloads need access to `huggingface.co` and its `cdn-lfs*` hosts.
+
+## Platforms
+
+Tamlil inherits Meetily's platform support: macOS on Apple Silicon is the primary target (Metal and CoreML acceleration, ScreenCaptureKit system audio), Windows x64 is supported (Vulkan acceleration, WASAPI loopback), and Linux builds are possible but experimental (ALSA/PulseAudio, `.deb`/AppImage/RPM via the manual `build-linux.yml` workflow). None of the fork's additions are platform-specific.
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push and pull request to `main`:
+
+1. **check** (Linux): Rust unit tests for the Tauri crate and `llama-helper`, TypeScript type-check.
+2. **build**: unsigned bundles for macOS (Apple Silicon) and Windows through the shared `build.yml`, uploaded as workflow artifacts (`tamlil-ci-*`).
+
+`release.yml` (manual) creates a draft GitHub release with signed, notarised builds. Secrets it expects:
+
+| Secret | Purpose |
+| --- | --- |
+| `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Updater signatures. Generate with `pnpm tauri signer generate` and put the public key in `tauri.conf.json`. Without the secret, CI signs with a throwaway key. |
+| `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `KEYCHAIN_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` | macOS code signing and notarisation. |
+| `SM_*` (DigiCert KeyLocker) | Windows code signing. |
 
 ## Updating from upstream
 

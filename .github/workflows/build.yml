@@ -19,7 +19,7 @@ on:
       asset-prefix:
         required: false
         type: string
-        default: "meetily"
+        default: "tamlil"
       asset-name-pattern:
         required: false
         type: string
@@ -601,6 +601,23 @@ jobs:
           key: ${{ runner.os }}-onnxruntime-${{ inputs.target }}-${{ hashFiles('frontend/src-tauri/build/onnxruntime.rs') }}
 
 
+      # The updater plugin refuses to build when a public key is configured but
+      # no private key is supplied. CI runs without the release key use a
+      # throwaway key so bundles still build (they are not valid updates).
+      - name: Ensure an updater signing key is available
+        id: signing-key
+        if: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY == '' }}
+        shell: bash
+        working-directory: frontend
+        run: |
+          pnpm tauri signer generate -w "$RUNNER_TEMP/ci-updater.key" --password "" --ci
+          {
+            echo "CI_TAURI_SIGNING_PRIVATE_KEY<<EOF_KEY"
+            cat "$RUNNER_TEMP/ci-updater.key"
+            echo "EOF_KEY"
+          } >> "$GITHUB_ENV"
+          echo "::warning::No TAURI_SIGNING_PRIVATE_KEY secret; bundles are signed with a throwaway key and cannot be used as auto-updates."
+
       - name: Build with Tauri
         id: tauri-build
         uses: tauri-apps/tauri-action@v0
@@ -614,13 +631,8 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ inputs.sign-binaries && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
           APPLE_SIGNING_IDENTITY: ${{ inputs.sign-binaries && env.CERT_ID || '' }}
           # Tauri updater signing (ALWAYS enabled for .sig files)
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # License validation RSA public key (embedded at build time)
-          MEETILY_RSA_PUBLIC_KEY: ${{ secrets.MEETILY_RSA_PUBLIC_KEY }}
-          # Supabase configuration (for online license verification)
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || env.CI_TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
         with:
           projectPath: frontend
           tagName: ${{ inputs.release-id && format('v{0}', steps.get-version.outputs.version) || '' }}
