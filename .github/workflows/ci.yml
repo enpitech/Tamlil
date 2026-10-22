@@ -177,7 +177,7 @@ jobs:
           mkdir -p dist/stable
           alias_first() { # alias_first <glob> <stable name>
             local src
-            src=$(find dist -maxdepth 1 -type f -name "$1" | sort | head -n1)
+            src=$(find dist -type f -not -path 'dist/stable/*' -name "$1" | sort | head -n1)
             if [[ -n "$src" ]]; then cp "$src" "dist/stable/$2"; echo "  $2 <- $(basename "$src")"; fi
           }
           alias_first '*.dmg'        'Tamlil-macos-arm64.dmg'
