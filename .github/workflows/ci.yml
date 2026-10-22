@@ -6,11 +6,13 @@ name: "CI"
 #               crate and llama-helper and the TypeScript type-check. Runs on
 #               Linux, so it needs the GTK/WebKit dev packages and a placeholder
 #               sidecar binary (the Tauri build script insists one exists).
-#  * `build`  – unsigned desktop bundles for macOS (Apple Silicon) and Windows
-#               through the shared build workflow, uploaded as run artifacts.
-#               Linux is built on demand only (see build-linux.yml).
+#  * `build`  – unsigned desktop bundles for macOS (Apple Silicon), Windows and
+#               Linux through the shared build workflow, uploaded as run artifacts.
+#  * `publish` – on pushes to main, refreshes the rolling "latest" pre-release
+#               with every bundle that was built, so there is one stable download
+#               page: https://github.com/enpitech/Tamlil/releases/tag/latest
 #
-# Signed, notarised builds are produced by release.yml (manual trigger).
+# Signed, notarised, versioned releases are produced by release.yml (manual).
 
 on:
   push:
@@ -132,6 +134,9 @@ jobs:
           - platform: "windows-latest"
             args: ""
             target: "x86_64-pc-windows-msvc"
+          - platform: "ubuntu-22.04" # experimental: .deb + AppImage
+            args: "--bundles deb,appimage"
+            target: "x86_64-unknown-linux-gnu"
     uses: ./.github/workflows/build.yml
     with:
       platform: ${{ matrix.platform }}
@@ -142,3 +147,56 @@ jobs:
       upload-artifacts: true
       is-debug-build: false
     secrets: inherit
+
+  publish:
+    name: Publish rolling "latest" pre-release
+    needs: build
+    # Run even if one platform failed so the others are still downloadable; never on PRs.
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all bundle artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: tamlil-ci-*
+          path: dist
+          merge-multiple: true
+
+      - name: List downloads
+        id: files
+        shell: bash
+        run: |
+          find dist -type f | sort
+          COUNT=$(find dist -type f \( -name '*.dmg' -o -name '*.app.tar.gz' -o -name '*.msi' -o -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.sig' \) | wc -l)
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Refresh the "latest" pre-release
+        if: ${{ steps.files.outputs.count != '0' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(grep -o '"version": "[^"]*"' frontend/src-tauri/tauri.conf.json | cut -d'"' -f4)
+          SHORT_SHA="${GITHUB_SHA::7}"
+          NOTES="Automated build of \`main\` @ ${SHORT_SHA} (app version ${VERSION}, built $(date -u +'%Y-%m-%d %H:%M UTC')).
+
+These bundles are **unsigned** (ad-hoc on macOS: right-click → Open on first launch, or run \`xattr -dr com.apple.quarantine Tamlil.app\`). They are refreshed on every push to main; use the versioned releases for anything you distribute.
+
+Commit: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
+
+          # Recreate so the tag follows main and stale assets disappear; the URL
+          # releases/tag/latest stays the same.
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "Latest build from main (${SHORT_SHA})" \
+            --notes "$NOTES" \
+            $(find dist -type f \( -name '*.dmg' -o -name '*.app.tar.gz' -o -name '*.msi' -o -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.sig' \) | sort)
+          echo "### Downloads refreshed" >> "$GITHUB_STEP_SUMMARY"
+          echo "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/latest" >> "$GITHUB_STEP_SUMMARY"
