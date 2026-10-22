@@ -51,3 +51,5 @@ In **Settings → Language** map each language to its transcription and summary 
 ## Credits
 
 Tamlil is built on [Meetily](https://github.com/Zackriya-Solutions/meeting-minutes) by [Zackriya Solutions](https://www.zackriya.com/) and its [contributors](https://github.com/Zackriya-Solutions/meeting-minutes/graphs/contributors), released under the MIT License (see [LICENSE.md](LICENSE.md)). Meetily in turn borrows from [whisper.cpp](https://github.com/ggerganov/whisper.cpp), [Screenpipe](https://github.com/mediar-ai/screenpipe) and [transcribe-rs](https://crates.io/crates/transcribe-rs), and uses NVIDIA's Parakeet model in the [ONNX conversion by istupakov](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx). Hebrew models come from [ivrit.ai](https://www.ivrit.ai/); speaker embeddings from [WeSpeaker](https://github.com/wenet-e2e/wespeaker). The original README is kept at [docs/UPSTREAM_README.md](docs/UPSTREAM_README.md).
+
+<a href="https://github.com/enpitech/Tamlil/graphs/contributors"><img src="https://contrib.rocks/image?repo=enpitech/Tamlil" alt="Contributors to Tamlil and Meetily" /></a>
