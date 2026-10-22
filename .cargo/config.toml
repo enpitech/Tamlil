@@ -1,0 +1,9 @@
+# Workspace-wide build environment (applies to frontend/src-tauri and llama-helper).
+
+[env]
+# llama.cpp (via llama-cpp-sys-2) builds its vendored cpp-httplib with OpenSSL
+# when CMake finds one. Recent Homebrew OpenSSL on macOS breaks that compile
+# (const X509_NAME* API change) and the sidecar never makes HTTPS requests, so
+# keep OpenSSL out of the build everywhere. llama-cpp-sys-2 forwards CMAKE_*
+# environment variables to CMake.
+CMAKE_DISABLE_FIND_PACKAGE_OpenSSL = "TRUE"

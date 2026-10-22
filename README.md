@@ -26,6 +26,8 @@ pnpm install
 
 Model downloads need access to `huggingface.co` and its `cdn-lfs*` hosts.
 
+The workspace `.cargo/config.toml` disables OpenSSL in the bundled llama.cpp build. Without it, the `llama-helper` sidecar fails to compile on macOS machines with a recent Homebrew OpenSSL (the vendored cpp-httplib does not build against it), and the sidecar never needs HTTPS anyway.
+
 ## Platforms
 
 Tamlil inherits Meetily's platform support: macOS on Apple Silicon is the primary target (Metal and CoreML acceleration, ScreenCaptureKit system audio), Windows x64 is supported (Vulkan acceleration, WASAPI loopback), and Linux builds are possible but experimental (ALSA/PulseAudio, `.deb`/AppImage/RPM via the manual `build-linux.yml` workflow). None of the fork's additions are platform-specific.
