@@ -9,13 +9,13 @@ No cloud, no account, no telemetry. Built for Hebrew and mixed Hebrew/English me
 
 <br>
 
-<a href="https://github.com/enpitech/Tamlil/releases/download/latest/Tamlil-macos-arm64.dmg"><img src="docs/tamlil/btn-macos.svg" alt="Download for macOS (Apple Silicon, .dmg)" height="68"></a>
+<a href="https://github.com/enpitech/Tamlil/releases/download/latest/Tamlil-macos-arm64.dmg"><img src="docs/tamlil/btn-macos.svg" alt="Download for macOS (Apple Silicon, .dmg)" height="64"></a>
 &nbsp;
-<a href="https://github.com/enpitech/Tamlil/releases/download/latest/Tamlil-windows-x64-setup.exe"><img src="docs/tamlil/btn-windows.svg" alt="Download for Windows (x64 setup .exe)" height="68"></a>
+<a href="https://github.com/enpitech/Tamlil/releases/download/latest/Tamlil-windows-x64-setup.exe"><img src="docs/tamlil/btn-windows.svg" alt="Download for Windows (x64 setup .exe)" height="64"></a>
 &nbsp;
-<a href="https://github.com/enpitech/Tamlil/releases/download/latest/Tamlil-linux-x64.AppImage"><img src="docs/tamlil/btn-linux.svg" alt="Download for Linux (x64 AppImage)" height="68"></a>
+<a href="https://github.com/enpitech/Tamlil/releases/download/latest/Tamlil-linux-x64.AppImage"><img src="docs/tamlil/btn-linux.svg" alt="Download for Linux (x64 AppImage)" height="64"></a>
 
-<a href="https://github.com/enpitech/Tamlil/releases/tag/latest"><img src="docs/tamlil/btn-all.svg" alt="All downloads" height="68"></a>
+<a href="https://github.com/enpitech/Tamlil/releases/tag/latest"><img src="docs/tamlil/btn-all.svg" alt="All downloads" height="64"></a>
 
 <sub>Latest build from <code>main</code>, refreshed by CI on every push. Also available: <a href="https://github.com/enpitech/Tamlil/releases/download/latest/Tamlil-windows-x64.msi">Windows .msi</a> · <a href="https://github.com/enpitech/Tamlil/releases/download/latest/Tamlil-linux-x64.deb">Linux .deb</a> · <a href="https://github.com/enpitech/Tamlil/releases">versioned releases</a></sub>
 
