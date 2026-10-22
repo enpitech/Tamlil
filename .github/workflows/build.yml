@@ -572,8 +572,15 @@ jobs:
             echo "Using CPU-only mode for Linux"
           fi
 
-          # Build llama-helper from workspace root
-          cargo build --release -p llama-helper $LLAMA_FEATURES
+          # Build llama-helper from workspace root. Surface compiler errors as
+          # annotations so they are visible without opening the raw log.
+          set -o pipefail
+          if ! cargo build --release -p llama-helper $LLAMA_FEATURES 2>&1 | tee "$RUNNER_TEMP/llama-helper-build.log"; then
+            grep -E '^(error|warning: build failed)|^\s+--> |CMake Error|error:' "$RUNNER_TEMP/llama-helper-build.log" | head -40 | while IFS= read -r line; do
+              echo "::error title=llama-helper build::${line}"
+            done
+            exit 1
+          fi
 
           # Determine target triple and binary extension
           TARGET="${{ inputs.target }}"
@@ -617,9 +624,12 @@ jobs:
             exit 0
           fi
           pnpm tauri signer generate -w "$RUNNER_TEMP/ci-updater.key" --password "" --ci
+          # The key file has no trailing newline (and CRLF on Windows); normalise it so the
+          # heredoc delimiter lands on its own line.
+          KEY_CONTENT="$(tr -d '\r' < "$RUNNER_TEMP/ci-updater.key")"
           {
             echo "CI_TAURI_SIGNING_PRIVATE_KEY<<EOF_KEY"
-            cat "$RUNNER_TEMP/ci-updater.key"
+            printf '%s\n' "$KEY_CONTENT"
             echo "EOF_KEY"
           } >> "$GITHUB_ENV"
           echo "::warning::No TAURI_SIGNING_PRIVATE_KEY secret; bundles are signed with a throwaway key and cannot be used as auto-updates."
