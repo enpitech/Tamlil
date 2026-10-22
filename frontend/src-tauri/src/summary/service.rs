@@ -153,6 +153,16 @@ fn build_summary_result_json(
         return Err("Final summary contains no visible content after title removal".to_string());
     }
 
+    // Summaries written directly in the meeting language (language routes) have no
+    // English intermediate; store no cache entry in that case.
+    if english_markdown.trim().is_empty() {
+        return Ok(serde_json::json!({
+            "markdown": markdown,
+            "reasoning_stripped": reasoning_stripped || cleaned_final.reasoning_stripped,
+            "normalization_fallback": normalization_fallback,
+        }));
+    }
+
     let cleaned_english = clean_llm_markdown_detailed(english_markdown);
     require_visible_markdown("English summary", &cleaned_english)?;
 
@@ -350,6 +360,32 @@ impl SummaryService {
             meeting_id
         );
 
+        // Detect the transcript language up front so a language route can pick the
+        // summary model and output mode before provider resolution.
+        let detected_summary_language =
+            Self::read_detected_summary_language(&pool, &meeting_id)
+                .await
+                .or_else(|| Self::detect_summary_language_from_text(&text));
+        let routing = crate::language_routing::summary_route_for(
+            &pool,
+            summary_language.as_deref().or(detected_summary_language.as_deref()),
+        )
+        .await;
+        let (model_provider, model_name) = match (&routing.provider, &routing.model) {
+            (Some(provider), Some(model)) => {
+                info!(
+                    "🌐 Language route selects {}/{} for the summary (configured: {}/{})",
+                    provider, model, model_provider, model_name
+                );
+                (provider.clone(), model.clone())
+            }
+            _ => (model_provider, model_name),
+        };
+        let direct_language = routing.direct_language.clone();
+        if let Some(code) = &direct_language {
+            info!("🌐 Language route: summary will be written directly in '{}'", code);
+        }
+
         // Parse provider
         let provider = match LLMProvider::from_str(&model_provider) {
             Ok(p) => p,
@@ -482,11 +518,6 @@ impl SummaryService {
             info!("📝 Summary language preference: {}", code);
         }
 
-        let detected_summary_language =
-            Self::read_detected_summary_language(&pool, &meeting_id)
-                .await
-                .or_else(|| Self::detect_summary_language_from_text(&text));
-
         if let Some(code) = &detected_summary_language {
             info!("📝 Detected transcript summary language: {}", code);
         }
@@ -564,6 +595,7 @@ impl SummaryService {
             summary_language.as_deref(),
             detected_summary_language.as_deref(),
             cached_english.as_deref(),
+            direct_language.as_deref(),
         )
         .await;
 

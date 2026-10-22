@@ -5,6 +5,8 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::model_registry::{self, ModelKind, ModelOrigin, RegistryEntry};
+
 // ============================================================================
 // Model Definitions
 // ============================================================================
@@ -159,9 +161,9 @@ pub struct ModelDef {
     pub description: String,
 }
 
-/// Get all available built-in AI models
-/// Add new models here - the system will automatically detect and manage them
-pub fn get_available_models() -> Vec<ModelDef> {
+/// Models compiled into the app. New defaults go here; anything else comes
+/// from the model registry (user-added URLs, imported files, discovered files).
+pub fn builtin_models() -> Vec<ModelDef> {
     vec![
         // Qwen 3.5 2B - Balanced tier
         ModelDef {
@@ -216,6 +218,89 @@ pub fn get_available_models() -> Vec<ModelDef> {
             description: "Fastest model. Runs on any hardware with ~1GB RAM. Good for quick summaries.".to_string(),
         },
     ]
+}
+
+/// Default context window for user-added GGUF models when none is given.
+pub const DEFAULT_USER_MODEL_CONTEXT: u32 = 8192;
+/// Default layer count assumed for user-added GGUF models (used for GPU offload heuristics).
+pub const DEFAULT_USER_MODEL_LAYERS: u32 = 32;
+/// Template name meaning "use the chat template embedded in the GGUF file".
+pub const AUTO_TEMPLATE: &str = "auto";
+
+/// Resolve a sampling preset by name. Unknown names fall back to the
+/// conservative structured preset.
+pub fn sampling_preset(name: Option<&str>, stop_tokens: Vec<String>) -> SamplingParams {
+    match name.map(|n| n.trim().to_ascii_lowercase()).as_deref() {
+        Some("qwen35_summary") => SamplingParams::qwen35_summary(stop_tokens),
+        Some("gemma3_instruct") => SamplingParams::gemma3_instruct(stop_tokens),
+        _ => SamplingParams::tight_structured(stop_tokens),
+    }
+}
+
+impl ModelDef {
+    /// Build a model definition from a registry entry (user-added or discovered GGUF).
+    pub fn from_registry_entry(entry: &RegistryEntry) -> Self {
+        let template = entry
+            .template
+            .clone()
+            .filter(|t| !t.trim().is_empty())
+            .unwrap_or_else(|| AUTO_TEMPLATE.to_string());
+        ModelDef {
+            name: entry.id.clone(),
+            display_name: entry.display_name.clone(),
+            gguf_file: entry.file_name.clone(),
+            template,
+            download_url: entry.download_url.clone().unwrap_or_default(),
+            size_mb: entry.size_mb.unwrap_or(0),
+            context_size: entry.context_size.unwrap_or(DEFAULT_USER_MODEL_CONTEXT),
+            layer_count: entry.layer_count.unwrap_or(DEFAULT_USER_MODEL_LAYERS),
+            sampling: sampling_preset(entry.sampling.as_deref(), Vec::new()),
+            description: entry.description.clone(),
+        }
+    }
+
+    /// Registry view of a built-in definition.
+    pub fn to_registry_entry(&self) -> RegistryEntry {
+        RegistryEntry {
+            id: self.name.clone(),
+            kind: ModelKind::Gguf,
+            display_name: self.display_name.clone(),
+            file_name: self.gguf_file.clone(),
+            download_url: Some(self.download_url.clone()),
+            size_mb: Some(self.size_mb),
+            sha256: None,
+            languages: Vec::new(),
+            description: self.description.clone(),
+            origin: ModelOrigin::BuiltIn,
+            accuracy: None,
+            speed: None,
+            template: Some(self.template.clone()),
+            context_size: Some(self.context_size),
+            layer_count: Some(self.layer_count),
+            sampling: None,
+        }
+    }
+}
+
+/// Built-in GGUF models as registry entries (consumed by `model_registry`).
+pub fn builtin_registry_entries() -> Vec<RegistryEntry> {
+    builtin_models().iter().map(ModelDef::to_registry_entry).collect()
+}
+
+/// All available built-in AI models: compiled-in defaults followed by every
+/// GGUF the registry knows about (user URLs, imports, files found on disk).
+pub fn get_available_models() -> Vec<ModelDef> {
+    let mut models = builtin_models();
+    for entry in model_registry::entries(ModelKind::Gguf) {
+        if entry.origin == ModelOrigin::BuiltIn {
+            continue;
+        }
+        if models.iter().any(|m| m.name == entry.id || m.gguf_file == entry.file_name) {
+            continue;
+        }
+        models.push(ModelDef::from_registry_entry(&entry));
+    }
+    models
 }
 
 /// Get a specific model by name
@@ -302,6 +387,11 @@ pub fn format_prompt(
     let template = match template_name {
         "gemma3" => GEMMA3_TEMPLATE,
         "qwen3.5_nonthinking" => QWEN35_NONTHINKING_TEMPLATE,
+        AUTO_TEMPLATE => {
+            return Err(anyhow!(
+                "Template 'auto' is applied by llama-helper from the GGUF metadata; send chat messages instead"
+            ))
+        }
         _ => return Err(anyhow!("Unknown template: {}", template_name)),
     };
 
@@ -390,6 +480,38 @@ mod tests {
         assert_eq!(gemma_4b.sampling.frequency_penalty, 0.0);
         assert_eq!(gemma_4b.sampling.repeat_penalty, 1.0);
         assert_eq!(gemma_4b.sampling.penalty_last_n, 0);
+    }
+
+    #[test]
+    fn registry_entries_become_auto_template_models() {
+        let entry = RegistryEntry {
+            id: "dictalm-2.0".to_string(),
+            kind: ModelKind::Gguf,
+            display_name: "DictaLM 2.0".to_string(),
+            file_name: "dictalm-2.0-instruct-Q4_K_M.gguf".to_string(),
+            download_url: None,
+            size_mb: None,
+            sha256: None,
+            languages: vec!["he".to_string()],
+            description: String::new(),
+            origin: ModelOrigin::User,
+            accuracy: None,
+            speed: None,
+            template: None,
+            context_size: None,
+            layer_count: None,
+            sampling: Some("qwen35_summary".to_string()),
+        };
+        let def = ModelDef::from_registry_entry(&entry);
+        assert_eq!(def.template, AUTO_TEMPLATE);
+        assert_eq!(def.context_size, DEFAULT_USER_MODEL_CONTEXT);
+        assert_eq!(def.size_mb, 0);
+        assert_eq!(def.sampling.temperature, 0.5);
+        assert!(format_prompt(AUTO_TEMPLATE, "s", "u").is_err());
+
+        let builtin = builtin_registry_entries();
+        assert!(builtin.iter().all(|e| e.origin == ModelOrigin::BuiltIn));
+        assert!(builtin.iter().any(|e| e.id == "qwen3.5:4b"));
     }
 
     #[test]

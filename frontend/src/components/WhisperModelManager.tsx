@@ -14,6 +14,8 @@ import {
   WhisperAPI
 } from '../lib/whisper';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { AddModelDialog } from './AddModelDialog';
+import { ModelRegistryAPI, ORIGIN_LABELS } from '../lib/model-registry';
 
 interface ModelManagerProps {
   selectedModel?: string;
@@ -35,6 +37,7 @@ export function ModelManager({
   const [downloadingModels, setDownloadingModels] = useState<Set<string>>(new Set());
   const [cancellingModels, setCancellingModels] = useState<Set<string>>(new Set());
   const [hasUserSelection, setHasUserSelection] = useState(false);
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
 
   // Refs for stable callbacks
   const onModelSelectRef = useRef(onModelSelect);
@@ -442,7 +445,52 @@ export function ModelManager({
     }
   };
 
+  const refreshModels = async () => {
+    try {
+      const modelList = await WhisperAPI.getAvailableModels();
+      setModels(modelList);
+    } catch (err) {
+      console.error('Failed to refresh models:', err);
+    }
+  };
+
+  // Models added, imported or removed elsewhere (settings, other dialogs)
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    listen<{ kind: string }>('model-registry-changed', (event) => {
+      if (event.payload.kind === 'whisper_ggml') {
+        void refreshModels();
+      }
+    }).then((fn) => { unlisten = fn; });
+    return () => { if (unlisten) unlisten(); };
+  }, []);
+
+  const removeCustomModel = async (modelName: string) => {
+    const displayName = getDisplayName(modelName);
+    try {
+      await ModelRegistryAPI.remove('whisper_ggml', modelName, true);
+      await refreshModels();
+      toast.success(`${displayName} removed`, { duration: 3000 });
+      if (selectedModel === modelName && onModelSelect) {
+        onModelSelect('');
+      }
+    } catch (err) {
+      toast.error(`Failed to remove ${displayName}`, {
+        description: err instanceof Error ? err.message : String(err),
+        duration: 4000
+      });
+    }
+  };
+
   const getDisplayName = (modelName: string): string => {
+    const registered = models.find(m => m.name === modelName);
+    if (registered?.origin && registered.origin !== 'built_in' && registered.display_name) {
+      return registered.display_name;
+    }
+    if (registered?.languages?.length && registered.display_name) {
+      // Language-specific built-ins (e.g. ivrit.ai Hebrew) carry a descriptive name
+      return registered.display_name;
+    }
     const modelNameMapping: { [key: string]: string } = {
       "small": "Small",
       "medium-q5_0": "Medium",
@@ -480,9 +528,13 @@ export function ModelManager({
   }
 
   const basicModelNames = ["small", "medium-q5_0", "large-v3-q5_0", "large-v3-turbo", "large-v3"];
+  const isCustom = (m: ModelInfo) => m.origin === 'user' || m.origin === 'discovered';
+  const isLanguageSpecific = (m: ModelInfo) => !isCustom(m) && (m.languages?.length ?? 0) > 0;
   const basicModels = models.filter(m => basicModelNames.includes(m.name))
     .sort((a, b) => basicModelNames.indexOf(a.name) - basicModelNames.indexOf(b.name));
-  const advancedModels = models.filter(m => !basicModelNames.includes(m.name));
+  const languageModels = models.filter(isLanguageSpecific);
+  const customModels = models.filter(isCustom);
+  const advancedModels = models.filter(m => !basicModelNames.includes(m.name) && !isCustom(m) && !isLanguageSpecific(m));
 
   return (
     <div className={`space-y-3 ${className}`}>
@@ -545,6 +597,94 @@ export function ModelManager({
           </AccordionItem>
         </Accordion>
       )}
+
+      {/* Language-specific models (e.g. Hebrew ivrit.ai) */}
+      {languageModels.length > 0 && (
+        <div className="space-y-3">
+          <h4 className="text-sm font-semibold text-gray-700 pt-2">Language-specific models</h4>
+          {languageModels.map((model) => (
+            <ModelCard
+              key={model.name}
+              model={model}
+              isSelected={selectedModel === model.name}
+              isRecommended={false}
+              onSelect={() => {
+                if (model.status === 'Available') {
+                  selectModel(model.name);
+                }
+              }}
+              onDownload={() => downloadModel(model.name)}
+              onCancel={() => cancelDownload(model.name)}
+              onDelete={() => deleteModel(model.name)}
+              isDownloading={downloadingModels.has(model.name)}
+              isCancelling={cancellingModels.has(model.name)}
+              displayName={getDisplayName(model.name)}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Custom models: added from a URL, imported, or found in the models folder */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between pt-2">
+          <h4 className="text-sm font-semibold text-gray-700">Your models</h4>
+          <button
+            type="button"
+            onClick={() => setAddDialogOpen(true)}
+            className="text-sm font-medium text-blue-600 hover:text-blue-700"
+          >
+            + Add model
+          </button>
+        </div>
+        {customModels.length === 0 ? (
+          <p className="text-xs text-gray-500">
+            Add any whisper.cpp model from a URL or a file, or drop a <code>.bin</code> file into the models folder.
+          </p>
+        ) : (
+          customModels.map((model) => (
+            <div key={model.name} className="space-y-1">
+              <ModelCard
+                model={model}
+                isSelected={selectedModel === model.name}
+                isRecommended={false}
+                onSelect={() => {
+                  if (model.status === 'Available') {
+                    selectModel(model.name);
+                  }
+                }}
+                onDownload={() => downloadModel(model.name)}
+                onCancel={() => cancelDownload(model.name)}
+                onDelete={() => deleteModel(model.name)}
+                isDownloading={downloadingModels.has(model.name)}
+                isCancelling={cancellingModels.has(model.name)}
+                displayName={getDisplayName(model.name)}
+              />
+              <div className="flex items-center justify-between px-1 text-xs text-gray-500">
+                <span>
+                  {model.origin ? ORIGIN_LABELS[model.origin] : ''}
+                  {model.languages?.length ? ` • ${model.languages.join(', ')}` : ''}
+                </span>
+                {!downloadingModels.has(model.name) && (
+                  <button
+                    type="button"
+                    onClick={() => removeCustomModel(model.name)}
+                    className="text-gray-400 hover:text-red-600"
+                  >
+                    Remove from list
+                  </button>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <AddModelDialog
+        kind="whisper_ggml"
+        open={addDialogOpen}
+        onOpenChange={setAddDialogOpen}
+        onAdded={() => { void refreshModels(); }}
+      />
 
       {/* Helper text */}
       {selectedModel && (

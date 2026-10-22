@@ -2,6 +2,7 @@ import { ModelConfig } from "@/components/ModelSettingsModal";
 import { PreferenceSettings } from "@/components/PreferenceSettings";
 import { DeviceSelection } from "@/components/DeviceSelection";
 import { LanguageSelection } from "@/components/LanguageSelection";
+import { LanguageRoutesSettings } from "@/components/LanguageRoutesSettings";
 import { TranscriptSettings } from "@/components/TranscriptSettings";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { toast } from "sonner";
@@ -209,7 +210,7 @@ export function SettingsModals({
     {/* Language Settings Modal */}
     {modals.languageSettings && (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+        <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 shadow-xl max-h-[90vh] overflow-y-auto">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold text-gray-900">Language Settings</h3>
             <button
@@ -228,6 +229,11 @@ export function SettingsModals({
             disabled={isRecording}
             provider={transcriptModelConfig.provider}
           />
+
+          <div className="mt-6 border-t border-gray-200 pt-4">
+            <h4 className="mb-3 text-sm font-semibold text-gray-900">Models per language</h4>
+            <LanguageRoutesSettings />
+          </div>
 
           <div className="mt-6 flex justify-end">
             <button

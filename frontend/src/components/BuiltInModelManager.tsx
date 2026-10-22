@@ -6,9 +6,11 @@ import { listen } from '@tauri-apps/api/event';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
-import { Download, RefreshCw, BadgeAlert, Trash2 } from 'lucide-react';
+import { Download, RefreshCw, BadgeAlert, Trash2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatSummaryModelSizeLabelFromMb } from '@/lib/onboarding-summary-model';
+import { AddModelDialog } from './AddModelDialog';
+import { ModelRegistryAPI, ORIGIN_LABELS, RegistryEntry } from '@/lib/model-registry';
 
 interface ModelInfo {
   name: string;
@@ -46,12 +48,20 @@ export function BuiltInModelManager({
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
   const [downloadProgressInfo, setDownloadProgressInfo] = useState<Record<string, DownloadProgressInfo>>({});
   const [downloadingModels, setDownloadingModels] = useState<Set<string>>(new Set());
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [registry, setRegistry] = useState<Record<string, RegistryEntry>>({});
 
   const fetchModels = async () => {
     try {
       setIsLoading(true);
       const data = (await invoke('builtin_ai_list_models')) as ModelInfo[];
       setModels(data);
+      try {
+        const entries = await ModelRegistryAPI.list('gguf');
+        setRegistry(Object.fromEntries(entries.map((e) => [e.id, e])));
+      } catch (err) {
+        console.warn('Failed to load model registry entries:', err);
+      }
 
       // Auto-select first available model if none selected
       if (data.length > 0 && !selectedModel) {
@@ -72,6 +82,33 @@ export function BuiltInModelManager({
   useEffect(() => {
     fetchModels();
   }, []);
+
+  // Refresh when models are added or removed from the registry elsewhere
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<{ kind: string }>('model-registry-changed', (event) => {
+      if (event.payload.kind === 'gguf') {
+        void fetchModels();
+      }
+    }).then((fn) => { unlisten = fn; });
+    return () => { if (unlisten) unlisten(); };
+  }, []);
+
+  const removeFromRegistry = async (modelName: string) => {
+    try {
+      await ModelRegistryAPI.remove('gguf', modelName, true);
+      toast.success(`${registry[modelName]?.display_name ?? modelName} removed`);
+      if (selectedModel === modelName) {
+        onModelSelect('');
+      }
+      await fetchModels();
+    } catch (error) {
+      console.error('Failed to remove model:', error);
+      toast.error('Failed to remove model', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
 
   // Listen for download progress events
   useEffect(() => {
@@ -264,14 +301,26 @@ export function BuiltInModelManager({
     );
   }
 
+  const addDialog = (
+    <AddModelDialog
+      kind="gguf"
+      open={addDialogOpen}
+      onOpenChange={setAddDialogOpen}
+      onAdded={() => { void fetchModels(); }}
+    />
+  );
+
   // Only show "no models" message after fetch has completed
   if (hasFetched && models.length === 0) {
     return (
-      <Alert>
-        <AlertDescription>
-          No models found. Download a model to get started with Built-in AI.
-        </AlertDescription>
-      </Alert>
+      <>
+        <Alert>
+          <AlertDescription>
+            No models found. Download a model or add your own to get started with Built-in AI.
+          </AlertDescription>
+        </Alert>
+        {addDialog}
+      </>
     );
   }
 
@@ -279,7 +328,19 @@ export function BuiltInModelManager({
     <div>
       <div className="flex items-center justify-between mb-4">
         <h4 className="text-sm font-bold">Built-in AI Models</h4>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            setAddDialogOpen(true);
+          }}
+        >
+          <Plus className="mr-2 h-4 w-4" />
+          Add model
+        </Button>
       </div>
+      {addDialog}
 
       <div
         className={cn(
@@ -295,6 +356,9 @@ export function BuiltInModelManager({
           const isNotDownloaded = model.status.type === 'not_downloaded';
           const isCorrupted = model.status.type === 'corrupted';
           const isError = model.status.type === 'error';
+          const entry = registry[model.name];
+          const isCustom = entry?.origin === 'user' || entry?.origin === 'discovered';
+          const hasDownloadUrl = !!entry?.download_url;
 
           return (
             <div
@@ -347,8 +411,12 @@ export function BuiltInModelManager({
                   </div>
                 </div>
                 <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:ml-4 sm:w-auto sm:justify-end">
+                  {/* Custom entry without a URL cannot be downloaded */}
+                  {isNotDownloaded && !modelIsDownloading && isCustom && !hasDownloadUrl && (
+                    <span className="text-xs text-gray-500">File missing</span>
+                  )}
                   {/* Not Downloaded - Show Download button */}
-                  {isNotDownloaded && !modelIsDownloading && (
+                  {isNotDownloaded && !modelIsDownloading && (!isCustom || hasDownloadUrl) && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -446,8 +514,25 @@ export function BuiltInModelManager({
                       : 'An error occurred'}
                   </p>
                 )}
-                <div className="text-xs text-gray-500">
-                  <span>{formatSummaryModelSizeLabelFromMb(model.size_mb)} • {model.context_size} tokens</span>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
+                  <span>
+                    {model.size_mb > 0 ? `${formatSummaryModelSizeLabelFromMb(model.size_mb)} • ` : ''}
+                    {model.context_size} tokens
+                    {isCustom && entry ? ` • ${ORIGIN_LABELS[entry.origin]}` : ''}
+                    {entry?.languages?.length ? ` • ${entry.languages.join(', ')}` : ''}
+                  </span>
+                  {isCustom && !modelIsDownloading && (
+                    <button
+                      type="button"
+                      className="text-gray-400 hover:text-red-600"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeFromRegistry(model.name);
+                      }}
+                    >
+                      Remove from list
+                    </button>
+                  )}
                 </div>
                 </div>
               </div>

@@ -212,3 +212,29 @@
     overflow: visible !important;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * Bidirectional text (Hebrew, Arabic, ...)
+ * Each paragraph resolves its own direction from its first strong character,
+ * like dir="auto", so mixed Hebrew/English notes and summaries read correctly.
+ * ------------------------------------------------------------------------- */
+.bidi-auto,
+.bn-editor .bn-inline-content,
+.bn-editor [data-content-type] > .bn-inline-content,
+.bn-editor h1,
+.bn-editor h2,
+.bn-editor h3,
+.bn-editor p,
+.bn-editor li,
+.bn-editor td,
+.bn-editor th {
+  unicode-bidi: plaintext;
+  text-align: start;
+}
+
+/* List markers and checkboxes follow the paragraph direction */
+.bn-editor .bn-block-content[data-content-type="bulletListItem"],
+.bn-editor .bn-block-content[data-content-type="numberedListItem"],
+.bn-editor .bn-block-content[data-content-type="checkListItem"] {
+  unicode-bidi: plaintext;
+}

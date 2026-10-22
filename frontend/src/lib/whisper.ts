@@ -7,10 +7,16 @@ export interface ModelInfo {
   speed: ProcessingSpeed;
   status: ModelStatus;
   description?: string;
+  /** Human-readable name from the model registry. */
+  display_name?: string;
+  /** Where the model entry came from (built-in catalog, added by the user, found on disk). */
+  origin?: 'built_in' | 'user' | 'discovered';
+  /** Language hints from the registry; empty means multilingual. */
+  languages?: string[];
 }
 
-export type ModelAccuracy = 'High' | 'Good' | 'Decent';
-export type ProcessingSpeed = 'Slow' | 'Medium' | 'Fast' | 'Very Fast';
+export type ModelAccuracy = 'High' | 'Good' | 'Decent' | 'Unknown';
+export type ProcessingSpeed = 'Slow' | 'Medium' | 'Fast' | 'Very Fast' | 'Unknown';
 
 export type ModelStatus =
   | 'Available'

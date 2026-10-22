@@ -25,6 +25,10 @@ use super::sidecar::SidecarManager;
 enum Request {
     Generate {
         prompt: String,
+        /// When set, llama-helper formats these with the GGUF's embedded chat
+        /// template and ignores `prompt`.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        messages: Option<Vec<ChatMessage>>,
         max_tokens: Option<i32>,
         context_size: Option<u32>,
         model_path: Option<String>,
@@ -38,6 +42,12 @@ enum Request {
         penalty_last_n: Option<i32>,
         stop_tokens: Option<Vec<String>>,
     },
+}
+
+#[derive(Debug, Serialize)]
+struct ChatMessage {
+    role: String,
+    content: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -154,9 +164,22 @@ pub async fn generate_with_builtin(
     // Resolve model path with caching (avoids repeated filesystem I/O)
     let model_path = get_cached_model_path(app_data_dir, model_name)?;
 
-    // Apply model-specific chat template
-    let formatted_prompt =
-        models::format_prompt(&model_def.template, system_prompt, user_prompt)?;
+    // Apply model-specific chat template. For "auto" the sidecar applies the
+    // chat template embedded in the GGUF, so we send raw messages instead.
+    let use_embedded_template = model_def.template == models::AUTO_TEMPLATE;
+    let formatted_prompt = if use_embedded_template {
+        String::new()
+    } else {
+        models::format_prompt(&model_def.template, system_prompt, user_prompt)?
+    };
+    let messages = if use_embedded_template {
+        Some(vec![
+            ChatMessage { role: "system".to_string(), content: system_prompt.to_string() },
+            ChatMessage { role: "user".to_string(), content: user_prompt.to_string() },
+        ])
+    } else {
+        None
+    };
     // Get or initialize sidecar manager
     let manager = {
         let mut global_manager = SIDECAR_MANAGER.lock().await;
@@ -182,6 +205,7 @@ pub async fn generate_with_builtin(
     let sampling = model_def.sampling.sanitize_for_llama_helper();
     let request = Request::Generate {
         prompt: formatted_prompt,
+        messages,
         max_tokens: Some(models::DEFAULT_MAX_TOKENS),
         context_size: Some(model_def.context_size),
         model_path: Some(model_path.to_string_lossy().to_string()),
@@ -306,6 +330,7 @@ mod tests {
     fn test_request_serialization() {
         let request = Request::Generate {
             prompt: "test prompt".to_string(),
+            messages: None,
             max_tokens: Some(512),
             context_size: Some(2048),
             model_path: Some("/path/to/model.gguf".to_string()),

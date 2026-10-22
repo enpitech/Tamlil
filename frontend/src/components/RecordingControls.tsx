@@ -11,6 +11,9 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import Analytics from '@/lib/analytics';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import type { TranscriptionErrorPayload } from '@/services/transcriptService';
+import type { RoutedLanguageEvent } from '@/lib/language-routes';
+import { LANGUAGES } from '@/constants/languages';
+import { toast } from 'sonner';
 
 interface RecordingControlsProps {
   isRecording: boolean;
@@ -308,10 +311,29 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
           setSpeechDetected(true);
         });
 
+        // Language routing: the backend identified the spoken language and (maybe) switched models
+        const languageRoutedUnsubscribe = await listen<RoutedLanguageEvent>('transcription-language-routed', (event) => {
+          const { language, provider, model, switched } = event.payload;
+          const name = LANGUAGES.find((l) => l.code === language)?.name ?? language.toUpperCase();
+          const engine = provider === 'parakeet' ? 'Parakeet' : 'Whisper';
+          if (switched) {
+            toast.info(`${name} detected`, {
+              description: `Switched transcription to ${engine} ${model}`,
+              duration: 5000,
+            });
+          } else {
+            toast.info(`${name} detected`, {
+              description: `Continuing with ${engine} ${model}`,
+              duration: 3000,
+            });
+          }
+        });
+
         unsubscribes = [
           transcriptErrorUnsubscribe,
           transcriptionErrorUnsubscribe,
-          speechDetectedUnsubscribe
+          speechDetectedUnsubscribe,
+          languageRoutedUnsubscribe
         ];
         console.log('Recording event listeners set up successfully');
       } catch (error) {

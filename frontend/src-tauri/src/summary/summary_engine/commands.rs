@@ -96,6 +96,19 @@ pub async fn builtin_ai_list_models<R: Runtime>(
     Ok(models)
 }
 
+/// Re-scan the models directory (used after the model registry changes).
+pub async fn rescan_models<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    let state: State<ModelManagerState> = app.state();
+    let manager = {
+        let manager_lock = state.0.lock().await;
+        manager_lock.as_ref().cloned()
+    };
+    match manager {
+        Some(manager) => manager.scan_models().await.map_err(|e| e.to_string()),
+        None => init_model_manager(app).await.map_err(|e| e.to_string()),
+    }
+}
+
 /// Get information about a specific model
 #[tauri::command]
 pub async fn builtin_ai_get_model_info<R: Runtime>(

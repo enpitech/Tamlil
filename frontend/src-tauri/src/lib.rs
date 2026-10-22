@@ -47,6 +47,8 @@ pub mod onboarding;
 pub mod openai;
 pub mod anthropic;
 pub mod groq;
+pub mod language_routing;
+pub mod model_registry;
 pub mod openrouter;
 pub mod parakeet_engine;
 pub mod state;
@@ -540,6 +542,12 @@ pub fn run() {
             // Set models directory to use app_data_dir (unified storage location)
             whisper_engine::commands::set_models_directory(&_app.handle());
 
+            // Model registry (built-in + user-added + discovered models) lives next to the model files
+            match _app.handle().path().app_data_dir() {
+                Ok(app_data_dir) => model_registry::init(app_data_dir.join("models")),
+                Err(e) => log::error!("Failed to resolve app data dir for the model registry: {}", e),
+            }
+
             // Initialize Whisper engine on startup
             tauri::async_runtime::spawn(async {
                 if let Err(e) = whisper_engine::commands::whisper_init().await {
@@ -643,6 +651,19 @@ pub fn run() {
             analytics::commands::track_analytics_transparency_viewed,
             whisper_engine::commands::whisper_init,
             whisper_engine::commands::whisper_get_available_models,
+            // Model registry commands
+            model_registry::commands::registry_list_models,
+            model_registry::commands::registry_get_models_directory,
+            model_registry::commands::registry_add_model_from_url,
+            model_registry::commands::registry_import_local_model,
+            model_registry::commands::registry_update_model,
+            model_registry::commands::registry_remove_model,
+            model_registry::commands::registry_pick_model_file,
+            // Language routing commands
+            language_routing::commands::language_routes_list,
+            language_routing::commands::language_routes_upsert,
+            language_routing::commands::language_routes_delete,
+            language_routing::commands::language_routes_detected_language,
             whisper_engine::commands::whisper_load_model,
             whisper_engine::commands::whisper_get_current_model,
             whisper_engine::commands::whisper_is_model_loaded,

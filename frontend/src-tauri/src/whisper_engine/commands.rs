@@ -2,7 +2,7 @@ use crate::whisper_engine::{is_download_cancelled, CancelDownloadOutcome, ModelI
 use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
 use tauri::{command, Emitter, Manager, AppHandle, Runtime};
-use crate::config::WHISPER_MODEL_CATALOG;
+use crate::model_registry::{self, ModelKind};
 
 // Global whisper engine
 pub static WHISPER_ENGINE: Mutex<Option<Arc<WhisperEngine>>> = Mutex::new(None);
@@ -83,17 +83,16 @@ fn discover_models_standalone() -> Result<Vec<ModelInfo>, String> {
 
     log::info!("Scanning for Whisper models in: {}", whisper_dir.display());
 
-    // Use centralized model catalog from config.rs
-    let model_configs = WHISPER_MODEL_CATALOG;
-
     let mut models = Vec::new();
 
-    for &(name, filename, size_mb, accuracy, speed, description) in model_configs {
-        let model_path = whisper_dir.join(filename);
+    for entry in model_registry::entries(ModelKind::WhisperGgml) {
+        let model_path = whisper_dir.join(&entry.file_name);
+        let mut actual_size_mb: u64 = 0;
         let status = if model_path.exists() {
             match std::fs::metadata(&model_path) {
                 Ok(metadata) => {
                     let file_size_mb = metadata.len() / (1024 * 1024);
+                    actual_size_mb = file_size_mb;
                     if file_size_mb >= 1 {
                         ModelStatus::Available
                     } else {
@@ -107,13 +106,16 @@ fn discover_models_standalone() -> Result<Vec<ModelInfo>, String> {
         };
 
         models.push(ModelInfo {
-            name: name.to_string(),
+            name: entry.id.clone(),
             path: model_path,
-            size_mb,
+            size_mb: entry.size_mb.filter(|mb| *mb > 0).unwrap_or(actual_size_mb) as u32,
             status,
-            accuracy: accuracy.to_string(),
-            speed: speed.to_string(),
-            description: description.to_string(),
+            accuracy: entry.accuracy.clone().unwrap_or_else(|| "Unknown".to_string()),
+            speed: entry.speed.clone().unwrap_or_else(|| "Unknown".to_string()),
+            description: entry.description.clone(),
+            display_name: entry.display_name.clone(),
+            origin: entry.origin,
+            languages: entry.languages.clone(),
         });
     }
 
@@ -294,39 +296,21 @@ pub async fn whisper_validate_model_ready_with_config<R: tauri::Runtime>(
             }
         }
 
-        // No model loaded - try to load user's configured model from transcript config
-        let model_to_load = match crate::api::api::api_get_transcript_config(
-            app.clone(),
-            app.state(),
-            None,
-        )
-        .await
-        {
-            Ok(Some(config)) => {
+        // No model loaded - try to load the configured model (with the language route applied)
+        let model_to_load = {
+            let config = crate::language_routing::session::resolve_transcript_config(app).await;
+            log::info!(
+                "Effective transcript config - provider: {}, model: {}",
+                config.provider,
+                config.model
+            );
+            if config.provider == "localWhisper" && !config.model.is_empty() {
+                log::info!("Using configured model: {}", config.model);
+                Some(config.model)
+            } else {
                 log::info!(
-                    "Got transcript config from API - provider: {}, model: {}",
-                    config.provider,
-                    config.model
-                );
-                if config.provider == "localWhisper" && !config.model.is_empty() {
-                    log::info!("Using user's configured model: {}", config.model);
-                    Some(config.model)
-                } else {
-                    log::info!(
-                        "API config uses non-local provider ({}) or empty model, will auto-select",
-                        config.provider
-                    );
-                    None
-                }
-            }
-            Ok(None) => {
-                log::info!("No transcript config found in API, will auto-select model");
-                None
-            }
-            Err(e) => {
-                log::warn!(
-                    "Failed to get transcript config from API: {}, will auto-select model",
-                    e
+                    "Config uses non-local provider ({}) or empty model, will auto-select",
+                    config.provider
                 );
                 None
             }
@@ -393,7 +377,7 @@ pub async fn whisper_transcribe_audio(audio_data: Vec<f32>) -> Result<String, St
 
     if let Some(engine) = engine {
         // Get language preference
-        let language = crate::get_language_preference_internal();
+        let language = crate::language_routing::session::whisper_language();
         engine
             .transcribe_audio(audio_data, language)
             .await

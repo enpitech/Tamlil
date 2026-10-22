@@ -23,7 +23,12 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Request {
     Generate {
+        #[serde(default)]
         prompt: String,
+        /// Chat messages to format with the model's embedded chat template.
+        /// When present, `prompt` is ignored.
+        #[serde(default)]
+        messages: Option<Vec<ChatMessage>>,
         max_tokens: Option<i32>,
         context_size: Option<u32>,
         model_path: Option<String>,
@@ -39,6 +44,12 @@ enum Request {
     },
     Ping,
     Shutdown,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ChatMessage {
+    role: String,
+    content: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -345,6 +356,30 @@ impl ModelState {
         Ok(())
     }
 
+    /// Format chat messages with the chat template embedded in the loaded GGUF.
+    /// Falls back to ChatML when the file carries no template.
+    fn format_messages(&self, messages: &[ChatMessage]) -> Result<String> {
+        use llama_cpp_2::model::{LlamaChatMessage, LlamaChatTemplate};
+
+        let model = self.model.as_ref().context("Model not loaded")?;
+        let template = match model.chat_template(None) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("⚠️ GGUF has no chat template ({}), falling back to chatml", e);
+                LlamaChatTemplate::new("chatml").context("invalid fallback template")?
+            }
+        };
+        let chat: Vec<LlamaChatMessage> = messages
+            .iter()
+            .map(|m| LlamaChatMessage::new(m.role.clone(), m.content.clone()))
+            .collect::<Result<_, _>>()
+            .context("chat message contains a NUL byte")?;
+        let formatted = model
+            .apply_chat_template(&template, &chat, true)
+            .context("failed to apply the model's chat template")?;
+        Ok(formatted)
+    }
+
     fn generate(
         &mut self,
         prompt: String,
@@ -589,6 +624,7 @@ fn main() -> Result<()> {
                 match serde_json::from_str::<Request>(line) {
                     Ok(Request::Generate {
                         prompt,
+                        messages,
                         max_tokens,
                         context_size,
                         model_path,
@@ -626,6 +662,21 @@ fn main() -> Result<()> {
                                 continue;
                             }
                         }
+
+                        // Apply the embedded chat template when messages were sent
+                        let prompt = match messages {
+                            Some(msgs) if !msgs.is_empty() => match state.format_messages(&msgs) {
+                                Ok(p) => p,
+                                Err(e) => {
+                                    send_response(&Response::Response {
+                                        text: String::new(),
+                                        error: Some(format!("Failed to format chat messages: {}", e)),
+                                    })?;
+                                    continue;
+                                }
+                            },
+                            _ => prompt,
+                        };
 
                         // Generate response with sampling parameters
                         match state.generate(

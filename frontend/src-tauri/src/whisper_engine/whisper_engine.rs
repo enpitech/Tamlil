@@ -12,7 +12,7 @@ use anyhow::{Result, anyhow};
 use reqwest::Client;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use crate::config::WHISPER_MODEL_CATALOG;
+use crate::model_registry::{self, ModelKind, ModelOrigin, RegistryEntry};
 use super::acceleration::{whisper_context_acceleration_for, WhisperCompiledBackend};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +33,27 @@ pub struct ModelInfo {
     pub speed: String,
     pub status: ModelStatus,
     pub description: String,
+    /// Human-readable name from the registry (falls back to `name`).
+    #[serde(default)]
+    pub display_name: String,
+    /// Where the entry came from: `built_in`, `user` or `discovered`.
+    #[serde(default = "default_model_origin")]
+    pub origin: ModelOrigin,
+    /// Language hints from the registry (empty = multilingual).
+    #[serde(default)]
+    pub languages: Vec<String>,
+}
+
+fn default_model_origin() -> ModelOrigin {
+    ModelOrigin::BuiltIn
+}
+
+/// Expected on-disk size for an entry, when the registry knows it.
+fn expected_min_size_bytes(entry: &RegistryEntry) -> Option<u64> {
+    entry
+        .size_mb
+        .filter(|mb| *mb > 0)
+        .map(|mb| ((mb as f64 * 0.9) as u64) * 1024 * 1024)
 }
 
 struct ActiveDownload {
@@ -64,6 +85,38 @@ pub enum CancelDownloadOutcome {
 }
 
 const CANCEL_DOWNLOAD_CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Verify a downloaded file against a hex SHA-256 digest from the registry.
+async fn verify_sha256(file_path: &PathBuf, expected_hex: &str) -> Result<()> {
+    use sha2::{Digest, Sha256};
+    use tokio::io::AsyncReadExt;
+
+    let mut file = fs::File::open(file_path)
+        .await
+        .map_err(|e| anyhow!("Failed to open model for checksum: {}", e))?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1024 * 1024];
+    loop {
+        let n = file
+            .read(&mut buf)
+            .await
+            .map_err(|e| anyhow!("Failed to read model for checksum: {}", e))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    let actual = format!("{:x}", hasher.finalize());
+    if actual.eq_ignore_ascii_case(expected_hex.trim()) {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "Checksum mismatch for downloaded model (expected {}, got {})",
+            expected_hex.trim(),
+            actual
+        ))
+    }
+}
 
 pub struct WhisperEngine {
     models_dir: PathBuf,
@@ -210,20 +263,27 @@ impl WhisperEngine {
     pub async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
         let models_dir = &self.models_dir;
         let mut models = Vec::new();
-        // Use centralized model catalog from config.rs
-        let model_configs = WHISPER_MODEL_CATALOG;
+        // Whisper models come from the registry: built-in catalog, user-added
+        // entries and any ggml file found in the models directory.
+        let entries = model_registry::entries(ModelKind::WhisperGgml);
 
-        for &(name, filename, size_mb, accuracy, speed, description) in model_configs {
+        for entry in entries {
+            let filename = entry.file_name.as_str();
             let model_path = models_dir.join(filename);
+            // A size of 0 / None means the registry does not know the expected size.
+            let expected_min_bytes = expected_min_size_bytes(&entry);
+            let mut actual_size_mb: u64 = 0;
             let status = if model_path.exists() {
                 // Check if file size is reasonable (at least 1MB for a valid model)
                 match std::fs::metadata(&model_path) {
                     Ok(metadata) => {
                         let file_size_bytes = metadata.len();
                         let file_size_mb = file_size_bytes / (1024 * 1024);
-                        let expected_min_size_mb = (size_mb as f64 * 0.9) as u64; // Allow 90% of expected size as minimum for more accurate corruption detection
+                        actual_size_mb = file_size_mb;
+                        // Allow 90% of expected size as minimum for more accurate corruption detection
+                        let min_bytes = expected_min_bytes.unwrap_or(1024 * 1024);
 
-                        if file_size_mb >= expected_min_size_mb && file_size_mb > 1 {
+                        if file_size_bytes >= min_bytes && file_size_mb > 1 {
                             // File size looks good, but let's also check if it's a valid GGML file
                             match self.validate_model_file(&model_path).await {
                                 Ok(_) => ModelStatus::Available,
@@ -232,16 +292,16 @@ impl WhisperEngine {
                                              filename);
                                     ModelStatus::Corrupted {
                                         file_size: file_size_bytes,
-                                        expected_min_size: (expected_min_size_mb * 1024 * 1024) as u64
+                                        expected_min_size: min_bytes,
                                     }
                                 }
                             }
                         } else if file_size_mb > 0 {
                             log::warn!("Model file {} exists but is corrupted ({} MB, expected ~{} MB)",
-                                     filename, file_size_mb, size_mb);
+                                     filename, file_size_mb, entry.size_mb.unwrap_or(0));
                             ModelStatus::Corrupted {
                                 file_size: file_size_bytes,
-                                expected_min_size: (expected_min_size_mb * 1024 * 1024) as u64
+                                expected_min_size: min_bytes,
                             }
                         } else {
                             ModelStatus::Missing
@@ -252,17 +312,20 @@ impl WhisperEngine {
             } else {
                 ModelStatus::Missing
             };
-            
+
             let model_info = ModelInfo {
-                name: name.to_string(),
+                name: entry.id.clone(),
                 path: model_path,
-                size_mb: size_mb as u32,
-                accuracy: accuracy.to_string(),
-                speed: speed.to_string(),
+                size_mb: entry.size_mb.filter(|mb| *mb > 0).unwrap_or(actual_size_mb) as u32,
+                accuracy: entry.accuracy.clone().unwrap_or_else(|| "Unknown".to_string()),
+                speed: entry.speed.clone().unwrap_or_else(|| "Unknown".to_string()),
                 status,
-                description: description.to_string(),
+                description: entry.description.clone(),
+                display_name: entry.display_name.clone(),
+                origin: entry.origin,
+                languages: entry.languages.clone(),
             };
-            
+
             models.push(model_info);
         }
         
@@ -842,6 +905,40 @@ impl WhisperEngine {
         self.models_dir.clone()
     }
 
+    /// Identify the spoken language of a 16 kHz mono clip using the loaded
+    /// model's language head. Returns the ISO-639-1 code and its probability.
+    pub async fn detect_language(&self, audio: &[f32]) -> Result<(String, f32)> {
+        if audio.len() < 16_000 {
+            return Err(anyhow!("Need at least one second of audio for language detection"));
+        }
+        let ctx_guard = self.current_context.read().await;
+        let ctx = ctx_guard
+            .as_ref()
+            .ok_or_else(|| anyhow!("No whisper model loaded for language detection"))?;
+
+        // whisper looks at a 30 s window; cap the input so the mel step stays cheap.
+        let window = &audio[..audio.len().min(30 * 16_000)];
+        let threads = std::thread::available_parallelism()
+            .map(|n| (n.get() / 2).max(1))
+            .unwrap_or(2);
+
+        let mut state = ctx
+            .create_state()
+            .map_err(|e| anyhow!("Failed to create whisper state: {:?}", e))?;
+        state
+            .pcm_to_mel(window, threads)
+            .map_err(|e| anyhow!("Failed to compute mel spectrogram: {:?}", e))?;
+        let (lang_id, probs) = state
+            .lang_detect(0, threads)
+            .map_err(|e| anyhow!("Language detection failed: {:?}", e))?;
+        let code = whisper_rs::get_lang_str(lang_id)
+            .ok_or_else(|| anyhow!("Unknown language id {}", lang_id))?
+            .to_string();
+        let confidence = probs.get(lang_id as usize).copied().unwrap_or(0.0);
+        log::info!("🌐 Whisper language detection: {} ({:.2})", code, confidence);
+        Ok((code, confidence))
+    }
+
     /// Validate if a model file is a valid GGML file by checking its header
     async fn validate_model_file(&self, model_path: &PathBuf) -> Result<()> {
         use tokio::io::AsyncReadExt;
@@ -969,29 +1066,32 @@ impl WhisperEngine {
             result = self.validate_model_file(file_path).await;
 
             if result.is_ok() {
-                let expected_min_size = WHISPER_MODEL_CATALOG
-                    .iter()
-                    .find(|model| model.0 == model_name)
-                    .map(|model| ((model.2 as f64 * 0.9) as u64) * 1024 * 1024);
+                let entry = model_registry::find(ModelKind::WhisperGgml, model_name);
+                // Unknown size (user-added model without metadata): any file that
+                // passed the GGML magic check and is at least 1 MiB is accepted.
+                let expected_min_size = entry
+                    .as_ref()
+                    .and_then(expected_min_size_bytes)
+                    .unwrap_or(1024 * 1024);
 
-                result = match expected_min_size {
-                    Some(expected_min_size) => match fs::metadata(file_path).await {
-                        Ok(metadata) if metadata.len() >= expected_min_size => Ok(()),
-                        Ok(metadata) => Err(anyhow!(
-                            "Downloaded model file is too small: {} bytes (expected at least {} bytes)",
-                            metadata.len(),
-                            expected_min_size
-                        )),
-                        Err(e) => Err(anyhow!(
-                            "Failed to read downloaded model file metadata: {}",
-                            e
-                        )),
-                    },
-                    None => Err(anyhow!(
-                        "Unsupported model for download validation: {}",
-                        model_name
+                result = match fs::metadata(file_path).await {
+                    Ok(metadata) if metadata.len() >= expected_min_size => Ok(()),
+                    Ok(metadata) => Err(anyhow!(
+                        "Downloaded model file is too small: {} bytes (expected at least {} bytes)",
+                        metadata.len(),
+                        expected_min_size
+                    )),
+                    Err(e) => Err(anyhow!(
+                        "Failed to read downloaded model file metadata: {}",
+                        e
                     )),
                 };
+
+                if result.is_ok() {
+                    if let Some(expected) = entry.as_ref().and_then(|e| e.sha256.clone()) {
+                        result = verify_sha256(file_path, &expected).await;
+                    }
+                }
             }
         }
 
@@ -1073,33 +1173,28 @@ impl WhisperEngine {
     pub async fn download_model(&self, model_name: &str, progress_callback: Option<Box<dyn Fn(u8) + Send>>) -> Result<()> {
         log::info!("Starting download for model: {}", model_name);
 
-        let model_url = match model_name {
-            "tiny" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
-            "base" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
-            "small" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
-            "medium" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
-            "large-v3-turbo" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
-            "large-v3" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
-            "tiny-q5_1" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin",
-            "base-q5_1" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin",
-            "small-q5_1" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin",
-            "medium-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q5_0.bin",
-            "large-v3-turbo-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
-            "large-v3-q5_0" => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q5_0.bin",
-            _ => return Err(anyhow!("Unsupported model: {}", model_name)),
-        };
+        let entry = model_registry::find(ModelKind::WhisperGgml, model_name)
+            .ok_or_else(|| anyhow!("Unsupported model: {}", model_name))?;
+        let model_url = entry.download_url.clone().ok_or_else(|| {
+            anyhow!(
+                "Model '{}' has no download URL. Copy the file into the models folder instead.",
+                model_name
+            )
+        })?;
 
-        self.download_model_from_url(model_name, model_url, progress_callback).await
+        self.download_model_from_url(model_name, &model_url, &entry.file_name, progress_callback)
+            .await
     }
 
     async fn download_model_from_url(
         &self,
         model_name: &str,
         model_url: &str,
+        file_name: &str,
         progress_callback: Option<Box<dyn Fn(u8) + Send>>,
     ) -> Result<()> {
         let active_download = self.reserve_active_download(model_name).await?;
-        let file_path = self.models_dir.join(format!("ggml-{}.bin", model_name));
+        let file_path = self.models_dir.join(file_name);
 
         let result = self
             .download_model_with_owner(
@@ -1141,7 +1236,7 @@ impl WhisperEngine {
         }
 
         let client = Client::builder()
-            .user_agent(concat!("Meetily/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("Tamlil/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(|e| anyhow!("Failed to create download client: {}", e))?;
         let response = tokio::select! {
@@ -1302,6 +1397,9 @@ mod tests {
                 speed: "Fast".to_string(),
                 status: ModelStatus::Downloading { progress: 42 },
                 description: "test model".to_string(),
+                display_name: "tiny".to_string(),
+                origin: ModelOrigin::BuiltIn,
+                languages: Vec::new(),
             },
         );
 
@@ -1648,13 +1746,13 @@ mod tests {
         engine.discover_models().await.unwrap();
         let (url, request, server) = response_http_server(8, b"ggml\0\0\0\0").await;
 
-        let error = engine.download_model_from_url("tiny", &url, None).await.unwrap_err();
+        let error = engine.download_model_from_url("tiny", &url, "ggml-tiny.bin", None).await.unwrap_err();
         let request = String::from_utf8(request.await.unwrap()).unwrap();
         server.await.unwrap();
 
         assert!(error.to_string().contains("too small"));
         assert!(request.to_ascii_lowercase().contains(&format!(
-            "user-agent: meetily/{}",
+            "user-agent: tamlil/{}",
             env!("CARGO_PKG_VERSION")
         )));
         assert!(!engine.active_downloads.lock().await.contains_key("tiny"));
@@ -1681,7 +1779,7 @@ mod tests {
         let download_a_engine = Arc::clone(&engine);
         let download_a = tokio::spawn(async move {
             download_a_engine
-                .download_model_from_url("tiny", &url_a, None)
+                .download_model_from_url("tiny", &url_a, "ggml-tiny.bin", None)
                 .await
         });
 
@@ -1714,7 +1812,7 @@ mod tests {
         let download_b_engine = Arc::clone(&engine);
         let download_b = tokio::spawn(async move {
             download_b_engine
-                .download_model_from_url("tiny", &url_b, None)
+                .download_model_from_url("tiny", &url_b, "ggml-tiny.bin", None)
                 .await
         });
         timeout(Duration::from_secs(1), headers_b)
@@ -1750,7 +1848,7 @@ mod tests {
         let (url, _request, server) = response_http_server(8, b"ggml").await;
 
         let error = engine
-            .download_model_from_url("tiny", &url, None)
+            .download_model_from_url("tiny", &url, "ggml-tiny.bin", None)
             .await
             .unwrap_err();
         server.await.unwrap();
@@ -1793,7 +1891,7 @@ mod tests {
         });
 
         assert!(engine
-            .download_model_from_url("tiny", &format!("http://{address}/model.bin"), None)
+            .download_model_from_url("tiny", &format!("http://{address}/model.bin"), "ggml-tiny.bin", None)
             .await
             .is_err());
         server.await.unwrap();

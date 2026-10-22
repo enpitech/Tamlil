@@ -107,6 +107,15 @@ pub struct ModelInfo {
 // Model Manager
 // ============================================================================
 
+/// Acceptable (min, max) size in MB for a model file. `0` = unknown size.
+fn expected_size_bounds_mb(size_mb: u64) -> (u64, u64) {
+    if size_mb == 0 {
+        (1, u64::MAX)
+    } else {
+        ((size_mb as f64 * 0.9) as u64, (size_mb as f64 * 1.1) as u64)
+    }
+}
+
 pub struct ModelManager {
     /// Directory where models are stored
     models_dir: PathBuf,
@@ -227,9 +236,10 @@ impl ModelManager {
                     Ok(metadata) => {
                         let file_size_mb = metadata.len() / (1024 * 1024);
 
-                        // Allow 10% variance for file size check
-                        let expected_min = (model_def.size_mb as f64 * 0.9) as u64;
-                        let expected_max = (model_def.size_mb as f64 * 1.1) as u64;
+                        // Allow 10% variance for file size check. A size of 0 means the
+                        // registry does not know the expected size (user-added model):
+                        // accept anything that is at least 1 MB.
+                        let (expected_min, expected_max) = expected_size_bounds_mb(model_def.size_mb);
 
                         log::info!(
                             "Model '{}': found {} MB (expected {}-{} MB)",
@@ -394,8 +404,7 @@ impl ModelManager {
         if file_path.exists() {
             if let Ok(metadata) = fs::metadata(&file_path).await {
                 let file_size_mb = metadata.len() / (1024 * 1024);
-                let expected_min = (model_def.size_mb as f64 * 0.9) as u64;
-                let expected_max = (model_def.size_mb as f64 * 1.1) as u64;
+                let (expected_min, expected_max) = expected_size_bounds_mb(model_def.size_mb);
 
                 if file_size_mb >= expected_min && file_size_mb <= expected_max {
                     log::info!(

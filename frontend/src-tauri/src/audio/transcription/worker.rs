@@ -98,6 +98,13 @@ pub fn start_transcription_task<R: Runtime>(
 
             let worker_handle = tokio::spawn(async move {
                 info!("👷 Worker {} started", worker_id);
+                let mut engine_clone = engine_clone;
+
+                // Language routing (auto mode): collect the first seconds of speech,
+                // identify the language, and switch to the routed model if one is configured.
+                let mut language_router = LanguageRouter::new(
+                    crate::language_routing::session::auto_detection_wanted(&app_clone).await,
+                );
 
                 // PRE-VALIDATE model state to avoid repeated async calls per chunk
                 let initial_model_loaded = engine_clone.is_model_loaded().await;
@@ -149,6 +156,15 @@ pub fn start_transcription_task<R: Runtime>(
 
                             let chunk_timestamp = chunk.timestamp;
                             let chunk_duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
+
+                            // Language identification + model routing on the first seconds of speech
+                            if language_router.pending() {
+                                if let Some(new_engine) =
+                                    language_router.observe(&chunk, &engine_clone, &app_clone).await
+                                {
+                                    engine_clone = new_engine;
+                                }
+                            }
 
                             // Transcribe with provider-agnostic approach
                             match transcribe_chunk_with_provider(
@@ -397,6 +413,173 @@ pub fn start_transcription_task<R: Runtime>(
 
 /// Transcribe audio chunk using the appropriate provider (Whisper, Parakeet, or trait-based)
 /// Returns: (text, confidence Option, is_partial)
+/// Collects early speech, identifies its language and swaps the transcription
+/// engine according to the configured language routes.
+struct LanguageRouter {
+    active: bool,
+    buffer: Vec<f32>,
+    attempts: u8,
+}
+
+impl LanguageRouter {
+    const SAMPLE_RATE: usize = 16_000;
+    const MAX_ATTEMPTS: u8 = 3;
+
+    fn new(active: bool) -> Self {
+        if active {
+            info!("🌐 Language routing active: waiting for speech to identify the language");
+        }
+        Self { active, buffer: Vec::new(), attempts: 0 }
+    }
+
+    fn pending(&self) -> bool {
+        self.active
+    }
+
+    /// Feed a chunk. Returns a replacement engine when routing selected a different model.
+    async fn observe<R: Runtime>(
+        &mut self,
+        chunk: &AudioChunk,
+        engine: &TranscriptionEngine,
+        app: &AppHandle<R>,
+    ) -> Option<TranscriptionEngine> {
+        use crate::language_routing::session;
+
+        let samples: Vec<f32> = if chunk.sample_rate != 16_000 {
+            crate::audio::audio_processing::resample_audio(&chunk.data, chunk.sample_rate, 16_000)
+        } else {
+            chunk.data.clone()
+        };
+        self.buffer.extend_from_slice(&samples);
+
+        let seconds = self.buffer.len() as f32 / Self::SAMPLE_RATE as f32;
+        if seconds < session::DETECTION_WINDOW_SECS {
+            return None;
+        }
+
+        self.attempts += 1;
+        let detection = detect_language_with_available_whisper(engine, &self.buffer).await;
+        let (code, confidence) = match detection {
+            Ok(result) => result,
+            Err(e) => {
+                warn!("🌐 Language detection unavailable, keeping the configured model: {}", e);
+                self.active = false;
+                self.buffer.clear();
+                return None;
+            }
+        };
+
+        let exhausted = self.attempts >= Self::MAX_ATTEMPTS || seconds >= session::DETECTION_MAX_SECS;
+        if confidence < session::DETECTION_MIN_CONFIDENCE && !exhausted {
+            info!(
+                "🌐 Language guess '{}' ({:.2}) below threshold, collecting more speech",
+                code, confidence
+            );
+            return None;
+        }
+
+        self.active = false;
+        self.buffer.clear();
+        session::set_detected(&code);
+
+        let before_provider = engine.provider_name().to_string();
+        let before_model = engine.get_current_model().await.unwrap_or_default();
+        let config = session::resolve_transcript_config(app).await;
+
+        let current_is_whisper = matches!(engine, TranscriptionEngine::Whisper(_));
+        let same_engine = match config.provider.as_str() {
+            "localWhisper" => current_is_whisper && before_model == config.model,
+            "parakeet" => matches!(engine, TranscriptionEngine::Parakeet(_)) && before_model == config.model,
+            _ => true,
+        };
+
+        if same_engine {
+            info!("🌐 Detected '{}' ({:.2}); current model already matches the route", code, confidence);
+            session::emit_routed(
+                app,
+                &session::RoutedLanguageEvent {
+                    language: code,
+                    confidence,
+                    provider: config.provider,
+                    model: config.model,
+                    switched: false,
+                },
+            );
+            return None;
+        }
+
+        info!(
+            "🌐 Detected '{}' ({:.2}); switching transcription from {} '{}' to {} '{}'",
+            code, confidence, before_provider, before_model, config.provider, config.model
+        );
+        if let Err(e) = super::engine::validate_transcription_model_ready(app).await {
+            warn!("🌐 Routed model not ready ({}); keeping '{}'", e, before_model);
+            let _ = app.emit(
+                "transcription-error",
+                &serde_json::json!({
+                    "error": e,
+                    "userMessage": format!(
+                        "The model configured for '{}' is not available. Continuing with '{}'.",
+                        code, before_model
+                    ),
+                    "actionable": true,
+                    "phase": "active"
+                }),
+            );
+            return None;
+        }
+        match super::engine::get_or_init_transcription_engine(app).await {
+            Ok(new_engine) => {
+                session::emit_routed(
+                    app,
+                    &session::RoutedLanguageEvent {
+                        language: code,
+                        confidence,
+                        provider: config.provider,
+                        model: config.model,
+                        switched: true,
+                    },
+                );
+                Some(new_engine)
+            }
+            Err(e) => {
+                warn!("🌐 Failed to switch transcription engine ({}); keeping '{}'", e, before_model);
+                None
+            }
+        }
+    }
+}
+
+/// Run whisper language identification using the active whisper engine, or any
+/// available whisper model when transcription currently runs on Parakeet.
+async fn detect_language_with_available_whisper(
+    engine: &TranscriptionEngine,
+    audio: &[f32],
+) -> std::result::Result<(String, f32), String> {
+    if let TranscriptionEngine::Whisper(whisper) = engine {
+        return whisper.detect_language(audio).await.map_err(|e| e.to_string());
+    }
+
+    crate::whisper_engine::commands::whisper_init().await?;
+    let whisper = {
+        let guard = crate::whisper_engine::commands::WHISPER_ENGINE
+            .lock()
+            .map_err(|_| "Whisper engine lock poisoned".to_string())?;
+        guard.as_ref().cloned().ok_or_else(|| "Whisper engine not initialized".to_string())?
+    };
+    if !whisper.is_model_loaded().await {
+        let models = whisper.discover_models().await.map_err(|e| e.to_string())?;
+        // Smallest available model is plenty for language identification
+        let candidate = models
+            .iter()
+            .filter(|m| matches!(m.status, crate::whisper_engine::ModelStatus::Available))
+            .min_by_key(|m| m.size_mb)
+            .ok_or_else(|| "No whisper model available for language detection".to_string())?;
+        whisper.load_model(&candidate.name).await.map_err(|e| e.to_string())?;
+    }
+    whisper.detect_language(audio).await.map_err(|e| e.to_string())
+}
+
 async fn transcribe_chunk_with_provider<R: Runtime>(
     engine: &TranscriptionEngine,
     chunk: AudioChunk,
@@ -437,8 +620,8 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
     // Transcribe using the appropriate engine (with improved error handling)
     match engine {
         TranscriptionEngine::Whisper(whisper_engine) => {
-            // Get language preference from global state
-            let language = crate::get_language_preference_internal();
+            // Language preference, with the auto-detected language pinned when routing is active
+            let language = crate::language_routing::session::whisper_language();
 
             match whisper_engine
                 .transcribe_audio_with_confidence(speech_samples, language)
@@ -517,7 +700,7 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
         }
         TranscriptionEngine::Provider(provider) => {
             // NEW: Trait-based provider (clean, unified interface)
-            let language = crate::get_language_preference_internal();
+            let language = crate::language_routing::session::whisper_language();
 
             match provider.transcribe(speech_samples, language).await {
                 Ok(result) => {
