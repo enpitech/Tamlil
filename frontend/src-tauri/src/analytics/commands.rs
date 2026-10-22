@@ -6,11 +6,21 @@ use crate::analytics::{AnalyticsClient, AnalyticsConfig};
 // Global analytics client
 static ANALYTICS_CLIENT: std::sync::Mutex<Option<Arc<AnalyticsClient>>> = std::sync::Mutex::new(None);
 
+/// Telemetry is off unless a PostHog project key is supplied at build time
+/// (`TAMLIL_POSTHOG_KEY`, optionally `TAMLIL_POSTHOG_HOST`). The upstream key
+/// is intentionally not shipped with this fork.
+const POSTHOG_KEY: Option<&str> = option_env!("TAMLIL_POSTHOG_KEY");
+const POSTHOG_HOST: Option<&str> = option_env!("TAMLIL_POSTHOG_HOST");
+
 #[command]
 pub async fn init_analytics() -> Result<(), String> {
+    let Some(api_key) = POSTHOG_KEY.filter(|k| !k.trim().is_empty()) else {
+        log::info!("Analytics disabled: no telemetry key compiled into this build");
+        return Ok(());
+    };
     let config = AnalyticsConfig {
-        api_key: "phc_ohznXPkRSJYWmrfez9mYxtXv5U5Nekq3iiUts87dJfcr".to_string(),
-        host: Some("https://us.i.posthog.com".to_string()),
+        api_key: api_key.to_string(),
+        host: Some(POSTHOG_HOST.unwrap_or("https://us.i.posthog.com").to_string()),
         enabled: true,
     };
     

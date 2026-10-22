@@ -2,6 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Tamlil fork
+
+This repository is **Tamlil**, a fork of Meetily (upstream: `Zackriya-Solutions/meeting-minutes`, tracked as the `upstream` git remote). Keep the diff against upstream thin: put new behaviour in its own module and add small hook points in upstream code. Fork-specific modules:
+
+- `frontend/src-tauri/src/model_registry/` – single catalog for whisper.cpp `.bin` and GGUF models: built-in defaults (upstream catalogs + ivrit.ai Hebrew models), user entries in `<app data>/models/registry.json`, and files discovered on disk. `whisper_engine` and `summary_engine::models` read from it. Frontend: `src/lib/model-registry.ts`, `src/components/AddModelDialog.tsx`.
+- `frontend/src-tauri/src/language_routing/` – `language_routes` table (language → STT model, summary model, summary mode). `session::resolve_transcript_config` is the single route-aware reader of the transcript config; the transcription worker runs whisper language ID on early speech and swaps engines; `summary::service` applies routes and `processor` supports a direct-language mode (no English intermediate). Frontend: `src/lib/language-routes.ts`, `src/components/LanguageRoutesSettings.tsx`.
+- `llama-helper` accepts `messages` and applies the GGUF-embedded chat template (template name `auto`).
+- Telemetry is compiled out unless `TAMLIL_POSTHOG_KEY` is set at build time.
+- Cloud sync / upload is intentionally **not** in this repository (private edition, configured by JSON, no UI).
+
+The rest of this file is the upstream guidance and still applies.
+
 ## Project Overview
 
 **Meetily** is a privacy-first AI meeting assistant that captures, transcribes, and summarizes meetings entirely on local infrastructure. The supported application is the Tauri desktop app with a Rust core.
