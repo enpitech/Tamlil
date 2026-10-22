@@ -89,13 +89,32 @@ jobs:
           path: frontend/src-tauri/binaries/ffmpeg-*
           key: ${{ runner.os }}-ffmpeg-${{ hashFiles('frontend/src-tauri/build.rs', 'frontend/src-tauri/build/ffmpeg.rs') }}
 
+      # Failures are echoed as annotations so they are visible without the raw log.
       - name: Rust unit tests (Tauri crate)
         working-directory: frontend/src-tauri
-        run: cargo test --lib
+        shell: bash
+        run: |
+          set -o pipefail
+          LOG="$RUNNER_TEMP/tauri-tests.log"
+          if ! cargo test --lib --no-fail-fast 2>&1 | tee "$LOG"; then
+            grep -nE '^test .* FAILED$|panicked at|^error(\[|:)|^\s+--> |^failures:' "$LOG" | head -60 | while IFS= read -r line; do
+              echo "::error title=cargo test (tauri)::${line}"
+            done
+            exit 1
+          fi
 
       - name: Rust unit tests (llama-helper)
         working-directory: llama-helper
-        run: cargo test
+        shell: bash
+        run: |
+          set -o pipefail
+          LOG="$RUNNER_TEMP/llama-helper-tests.log"
+          if ! cargo test --no-fail-fast 2>&1 | tee "$LOG"; then
+            grep -nE '^test .* FAILED$|panicked at|^error(\[|:)|^\s+--> |^failures:' "$LOG" | head -60 | while IFS= read -r line; do
+              echo "::error title=cargo test (llama-helper)::${line}"
+            done
+            exit 1
+          fi
 
   build:
     name: Bundle
