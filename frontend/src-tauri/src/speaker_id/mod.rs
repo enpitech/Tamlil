@@ -49,7 +49,9 @@ const MIN_SECONDS_FOR_NEW_SPEAKER: f32 = 2.5;
 /// Hard cap so noise cannot create endless speakers.
 const MAX_SPEAKERS: usize = 12;
 /// Similarity needed to label a voice with a remembered (named) profile.
-const PROFILE_MATCH_THRESHOLD: f32 = 0.6;
+/// Calibration on FLEURS (qa/embed_reference.py): same speaker 0.55-0.89 between
+/// halves of one clip, different speakers at most 0.31.
+const PROFILE_MATCH_THRESHOLD: f32 = 0.5;
 /// Re-check unnamed speakers against remembered voices once their centroid
 /// has this many clips (early guesses are noisy).
 const PROFILE_RECHECK_AT: &[u32] = &[3, 6, 12];
@@ -263,8 +265,19 @@ pub struct SpeakerEngine {
 impl SpeakerEngine {
     pub fn load(path: &Path) -> Result<Self> {
         crate::ensure_onnx_runtime_available()?;
+        // Graph optimisation is OFF on purpose: with the bundled onnxruntime every
+        // level above `Disable` silently corrupts this model's embeddings (verified
+        // against the Kaldi/onnxruntime reference in qa/embed_reference.py: cosine
+        // 1.000 disabled vs 0.04-0.5 at Level1+). The model is 28 MB; the cost is
+        // a few milliseconds. TAMLIL_ORT_OPT=1..3 re-enables it for experiments.
+        let opt_level = match std::env::var("TAMLIL_ORT_OPT").as_deref() {
+            Ok("1") => GraphOptimizationLevel::Level1,
+            Ok("2") => GraphOptimizationLevel::Level2,
+            Ok("3") => GraphOptimizationLevel::Level3,
+            _ => GraphOptimizationLevel::Disable,
+        };
         let session = Session::builder()?
-            .with_optimization_level(GraphOptimizationLevel::Level3)?
+            .with_optimization_level(opt_level)?
             .with_execution_providers(vec![CPUExecutionProvider::default().build()])?
             .with_intra_threads(2)?
             .commit_from_file(path)

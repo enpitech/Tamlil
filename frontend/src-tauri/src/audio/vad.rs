@@ -17,6 +17,15 @@ pub struct SpeechSegment {
     pub confidence: f32,
 }
 
+/// Tuning knobs for the QA harness (`TAMLIL_VAD_*`); production uses the defaults.
+fn env_f32(name: &str, default: f32) -> f32 {
+    std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+}
+
+fn env_u64(name: &str, default: u64) -> u64 {
+    std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+}
+
 /// Processes audio in 30ms chunks but returns complete speech segments
 pub struct ContinuousVadProcessor {
     session: VadSession,
@@ -43,8 +52,8 @@ impl ContinuousVadProcessor {
         // CONTINUOUS SPEECH FIX: Tuned for capturing complete 5+ second utterances
         // Previous: 0.55/0.40 with 400ms redemption was fragmenting speech into 40ms segments
         // New: More lenient thresholds + longer redemption for continuous speech
-        config.positive_speech_threshold = 0.50;  // Silero default - good for continuous speech
-        config.negative_speech_threshold = 0.35;  // Silero default - allows natural pauses
+        config.positive_speech_threshold = env_f32("TAMLIL_VAD_THRESHOLD", 0.50);  // Silero default - good for continuous speech
+        config.negative_speech_threshold = env_f32("TAMLIL_VAD_NEG_THRESHOLD", 0.35);  // Silero default - allows natural pauses
 
         // Use the caller's redemption time without additional capping. The batch
         // paths (`import.rs`, `retranscription.rs`) pass 2000ms to bridge natural
@@ -52,8 +61,8 @@ impl ContinuousVadProcessor {
         // latency. A qualifying silence is still required; bounded uninterrupted-
         // speech delivery is tracked in #756.
         config.redemption_time = Duration::from_millis(redemption_time_ms as u64);
-        config.pre_speech_pad = Duration::from_millis(300);   // Pre-speech padding for context
-        config.post_speech_pad = Duration::from_millis(400);  // Increased: more context at end
+        config.pre_speech_pad = Duration::from_millis(env_u64("TAMLIL_VAD_PRE_PAD_MS", 300));   // Pre-speech padding for context
+        config.post_speech_pad = Duration::from_millis(env_u64("TAMLIL_VAD_POST_PAD_MS", 400));  // Increased: more context at end
 
         // CRITICAL FIX: Increased min_speech_time to prevent tiny 40ms fragments
         // Previous: 100ms allowed too-short segments that Whisper rejects

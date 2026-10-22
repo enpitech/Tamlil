@@ -227,6 +227,18 @@ async fn qa_meeting_vad_pipeline() {
     let (audio, spans) = build_meeting(&speakers);
     let engine = whisper_with(HEBREW_MODEL).await;
 
+    // VAD variants: "name:threshold:pre_pad_ms" entries in TAMLIL_QA_VAD_VARIANTS
+    // (default: the production settings only).
+    let variants: Vec<String> = std::env::var("TAMLIL_QA_VAD_VARIANTS")
+        .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+        .unwrap_or_else(|_| vec!["default:0.50:300".to_string()]);
+    let mut worst_rate = 0.0f32;
+    for variant in &variants {
+    let parts: Vec<&str> = variant.split(':').collect();
+    if parts.len() == 3 {
+        std::env::set_var("TAMLIL_VAD_THRESHOLD", parts[1]);
+        std::env::set_var("TAMLIL_VAD_PRE_PAD_MS", parts[2]);
+    }
     let segments = vad_segments(&audio);
     let seg_secs: Vec<f32> = segments.iter().map(|s| s.samples.len() as f32 / SAMPLE_RATE as f32).collect();
     let covered: f32 = seg_secs.iter().sum();
@@ -249,19 +261,23 @@ async fn qa_meeting_vad_pipeline() {
     let (rate, errors, words) = wer(&reference, &hypothesis);
     let _ = spans;
 
+    worst_rate = worst_rate.max(rate);
     report(&format!(
-        "## Simulated meeting through VAD + per-segment whisper\n\n\
+        "## Simulated meeting through VAD + per-segment whisper (VAD variant {})\n\n\
          {} Hebrew clips, {:.0} s speech in {:.0} s of audio. VAD produced **{} segments** \
          (mean {:.1} s, min {:.1} s, max {:.1} s) covering {:.0} s. Whisper compute {:.0} s → **RTF {:.2}** vs speech. \
          **WER {:.1}%** ({} / {}).\n\n| seg | start | s | text |\n|---|---|---|---|\n{}",
-        speakers.len(), speech, audio.len() as f32 / SAMPLE_RATE as f32, segments.len(),
+        variant, speakers.len(), speech, audio.len() as f32 / SAMPLE_RATE as f32, segments.len(),
         covered / segments.len().max(1) as f32,
         seg_secs.iter().cloned().fold(f32::INFINITY, f32::min),
         seg_secs.iter().cloned().fold(0.0, f32::max),
         covered, compute, compute / speech.max(0.1), rate * 100.0, errors, words,
         lines.join("\n")
     ));
-    assert!(rate < 0.7, "meeting WER {:.1}% is unusable", rate * 100.0);
+    }
+    std::env::remove_var("TAMLIL_VAD_THRESHOLD");
+    std::env::remove_var("TAMLIL_VAD_PRE_PAD_MS");
+    assert!(worst_rate < 0.7, "meeting WER {:.1}% is unusable", worst_rate * 100.0);
 }
 
 #[tokio::test]
