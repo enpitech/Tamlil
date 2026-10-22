@@ -17,7 +17,7 @@ pub const DETECTION_WINDOW_SECS: f32 = 8.0;
 /// Give up on detection after this much speech without a confident result.
 pub const DETECTION_MAX_SECS: f32 = 30.0;
 /// Minimum whisper language probability to act on.
-pub const DETECTION_MIN_CONFIDENCE: f32 = 0.5;
+pub const DETECTION_MIN_CONFIDENCE: f32 = 0.6;
 
 pub fn reset() {
     if let Ok(mut guard) = DETECTED_LANGUAGE.write() {
@@ -139,10 +139,16 @@ pub async fn identify_language(
             }
         };
         let window: Vec<f32> = audio.to_vec();
-        return tokio::task::spawn_blocking(move || identifier.detect(&window))
+        let scores = tokio::task::spawn_blocking(move || identifier.scores(&window))
             .await
             .map_err(|e| e.to_string())?
-            .map_err(|e| e.to_string());
+            .map_err(|e| e.to_string())?;
+        let candidates = candidate_languages(&routed_languages());
+        let top: Vec<String> = scores.iter().take(3).map(|(c, p)| format!("{} {:.2}", c, p)).collect();
+        let chosen = crate::whisper_engine::choose_language(&scores, &candidates)
+            .ok_or_else(|| "Language identification returned no scores".to_string())?;
+        log::info!("🌐 Language scores [{}] → '{}' ({:.2}) among candidates {:?}", top.join(", "), chosen.0, chosen.1, candidates);
+        return Ok(chosen);
     }
 
     // 3. Last resort: a language-specific model (unreliable)
@@ -164,16 +170,37 @@ pub async fn identify_language(
     engine.detect_language(audio).await.map_err(|e| e.to_string())
 }
 
+/// Languages the user works in: every enabled route's language plus English.
+fn candidate_languages(routed: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = routed.to_vec();
+    if !out.iter().any(|l| l == "en") {
+        out.push("en".to_string());
+    }
+    out
+}
+
+static ROUTED_LANGUAGES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Languages of enabled routes, cached by `routed_whisper_models`.
+fn routed_languages() -> Vec<String> {
+    ROUTED_LANGUAGES.lock().map(|g| g.clone()).unwrap_or_default()
+}
+
 /// Whisper models that enabled language routes point at (candidates for the
 /// language-identification pass, so the later switch needs no second load).
 pub async fn routed_whisper_models<R: Runtime>(app: &AppHandle<R>) -> Vec<String> {
     let state = app.state::<AppState>();
     match LanguageRouteRepository::list(state.db_manager.pool()).await {
-        Ok(routes) => routes
-            .into_iter()
-            .filter(|r| r.enabled && r.stt_provider.as_deref() == Some("localWhisper"))
-            .filter_map(|r| r.stt_model)
-            .collect(),
+        Ok(routes) => {
+            if let Ok(mut g) = ROUTED_LANGUAGES.lock() {
+                *g = routes.iter().filter(|r| r.enabled).map(|r| r.language.clone()).collect();
+            }
+            routes
+                .into_iter()
+                .filter(|r| r.enabled && r.stt_provider.as_deref() == Some("localWhisper"))
+                .filter_map(|r| r.stt_model)
+                .collect()
+        }
         Err(e) => {
             log::warn!("Could not read language routes: {}", e);
             Vec::new()

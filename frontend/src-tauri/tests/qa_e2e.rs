@@ -181,6 +181,9 @@ async fn qa_transcription_per_clip() {
     let max: usize = std::env::var("TAMLIL_QA_MAX_CLIPS").ok().and_then(|v| v.parse().ok()).unwrap_or(16);
     let engine = whisper_with(HEBREW_MODEL).await;
 
+    let mut worst = 0.0f32;
+    for mode in ["full", "dynamic"] {
+    std::env::set_var("TAMLIL_AUDIO_CTX", mode);
     let mut rows = Vec::new();
     let (mut total_errors, mut total_words, mut total_audio, mut total_time) = (0usize, 0usize, 0f32, 0f32);
     for clip in clips.iter().filter(|c| c.lang == "he_il").take(max) {
@@ -202,14 +205,17 @@ async fn qa_transcription_per_clip() {
         ));
     }
     let overall = total_errors as f32 / total_words.max(1) as f32;
+    worst = worst.max(overall);
     report(&format!(
-        "## Per-clip transcription (ivrit large-v3-turbo, language=he)\n\n\
+        "## Per-clip transcription (ivrit large-v3-turbo, language=he, encoder context: {})\n\n\
          Clips: {} · audio {:.0} s · compute {:.0} s · **RTF {:.2}** · **WER {:.1}%** ({} errors / {} words)\n\n\
          | clip | voice | s | RTF | WER | reference | recognised |\n|---|---|---|---|---|---|---|\n{}",
-        rows.len(), total_audio, total_time, total_time / total_audio.max(0.1), overall * 100.0, total_errors, total_words,
+        mode, rows.len(), total_audio, total_time, total_time / total_audio.max(0.1), overall * 100.0, total_errors, total_words,
         rows.join("\n")
     ));
-    assert!(overall < 0.6, "WER {:.1}% is unusable", overall * 100.0);
+    }
+    std::env::remove_var("TAMLIL_AUDIO_CTX");
+    assert!(worst < 0.6, "WER {:.1}% is unusable", worst * 100.0);
 }
 
 #[tokio::test]
@@ -278,7 +284,9 @@ async fn qa_language_detection() {
         let expected = if clip.lang == "he_il" { "he" } else { "en" };
         let window: Vec<f32> = clip.audio.iter().take(SAMPLE_RATE * 8).cloned().collect();
         let t = Instant::now();
-        let g = identifier.detect(&window);
+        let g = identifier
+            .scores(&window)
+            .and_then(|sc| app_lib::whisper_engine::choose_language(&sc, &["he".to_string(), "en".to_string()]).ok_or_else(|| anyhow::anyhow!("no scores")));
         let g_secs = t.elapsed().as_secs_f32();
         let t = Instant::now();
         let i = ivrit.detect_language(&window).await;
@@ -406,4 +414,24 @@ async fn qa_speaker_identification() {
     assert!(tracker.speaker_count() <= 4, "too many speakers: {}", tracker.speaker_count());
     assert!(crossed.is_empty(), "female and male voices share labels: {:?}", crossed);
     assert_eq!(you, mic_total, "mic-is-me must label every mic segment You");
+}
+
+/// Dump whole-clip speaker embeddings as JSON for cross-checking the Rust
+/// fbank + ONNX path against a reference implementation (see qa/embed_reference.py).
+#[tokio::test]
+#[ignore]
+async fn qa_dump_speaker_embeddings() {
+    let clips = load_clips();
+    let model = env_path("TAMLIL_QA_SPEAKER_MODEL").expect("TAMLIL_QA_SPEAKER_MODEL not set");
+    let engine = SpeakerEngine::load(&model).expect("speaker model");
+    let out = env_path("TAMLIL_QA_DATA").unwrap().join("embeddings-rust.json");
+    let mut entries = Vec::new();
+    for clip in &clips {
+        if let Ok(Some(e)) = engine.embed(&clip.audio) {
+            let vals: Vec<String> = e.iter().map(|v| format!("{:.6}", v)).collect();
+            entries.push(format!("\"{}/{}\": [{}]", clip.lang, clip.id, vals.join(",")));
+        }
+    }
+    fs::write(&out, format!("{{{}}}", entries.join(",\n"))).unwrap();
+    report(&format!("- Wrote {} embeddings to `{}`", entries.len(), out.display()));
 }

@@ -674,6 +674,12 @@ impl WhisperEngine {
         let duration_seconds = audio_data.len() as f64 / 16000.0;
         let is_partial = duration_seconds < 15.0; // Consider chunks under 15s as partial
 
+        // Encoder context sized to the chunk (whisper otherwise encodes a padded
+        // 30 s window for every chunk, which dominates the cost of short VAD segments).
+        if let Some(ctx_len) = audio_ctx_for(duration_seconds as f32) {
+            params.set_audio_ctx(ctx_len);
+        }
+
         // PERFORMANCE: Suppress verbose C library logs during transcription
         // This hides whisper_full_with_state debug logs and beam search details
         let (num_segments, state) = {
@@ -1347,8 +1353,33 @@ impl WhisperEngine {
 }
 
 
+/// Encoder context length for a chunk of this many seconds, or `None` to keep
+/// whisper's full 30 s window. Whisper maps 30 s to 1500 encoder positions;
+/// shorter chunks need proportionally fewer, with a floor that keeps quality
+/// (whisper.cpp's streaming examples use 512-768). Controlled by
+/// `TAMLIL_AUDIO_CTX`: `dynamic` (default) or `full`.
+pub fn audio_ctx_for(seconds: f32) -> Option<i32> {
+    if let Ok("full") = std::env::var("TAMLIL_AUDIO_CTX").as_deref() {
+        return None;
+    }
+    if seconds >= 26.0 {
+        return None;
+    }
+    let needed = (seconds * 50.0).ceil() as i32 + 64; // 50 positions per second + margin
+    let rounded = ((needed + 63) / 64) * 64;
+    Some(rounded.clamp(512, 1500))
+}
+
 /// Run whisper's language head on up to 30 s of 16 kHz audio.
 fn lang_detect_with(ctx: &WhisperContext, audio: &[f32]) -> Result<(String, f32)> {
+    let scores = lang_scores_with(ctx, audio)?;
+    let (code, confidence) = scores.first().cloned().ok_or_else(|| anyhow!("No language scores"))?;
+    log::info!("🌐 Whisper language detection: {} ({:.2})", code, confidence);
+    Ok((code, confidence))
+}
+
+/// Language probabilities, best first, for up to 30 s of 16 kHz audio.
+fn lang_scores_with(ctx: &WhisperContext, audio: &[f32]) -> Result<Vec<(String, f32)>> {
     if audio.len() < 16_000 {
         return Err(anyhow!("Need at least one second of audio for language detection"));
     }
@@ -1364,15 +1395,16 @@ fn lang_detect_with(ctx: &WhisperContext, audio: &[f32]) -> Result<(String, f32)
     state
         .pcm_to_mel(window, threads)
         .map_err(|e| anyhow!("Failed to compute mel spectrogram: {:?}", e))?;
-    let (lang_id, probs) = state
+    let (_lang_id, probs) = state
         .lang_detect(0, threads)
         .map_err(|e| anyhow!("Language detection failed: {:?}", e))?;
-    let code = whisper_rs::get_lang_str(lang_id)
-        .ok_or_else(|| anyhow!("Unknown language id {}", lang_id))?
-        .to_string();
-    let confidence = probs.get(lang_id as usize).copied().unwrap_or(0.0);
-    log::info!("🌐 Whisper language detection: {} ({:.2})", code, confidence);
-    Ok((code, confidence))
+    let mut scores: Vec<(String, f32)> = probs
+        .iter()
+        .enumerate()
+        .filter_map(|(id, p)| whisper_rs::get_lang_str(id as i32).map(|c| (c.to_string(), *p)))
+        .collect();
+    scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(scores)
 }
 
 /// A small general whisper model kept loaded (CPU, ~150 MB for `base`) purely
@@ -1398,11 +1430,54 @@ impl LanguageIdentifier {
     pub fn detect(&self, audio: &[f32]) -> Result<(String, f32)> {
         lang_detect_with(&self.ctx, audio)
     }
+
+    /// All language probabilities, best first.
+    pub fn scores(&self, audio: &[f32]) -> Result<Vec<(String, f32)>> {
+        lang_scores_with(&self.ctx, audio)
+    }
+}
+
+/// Pick the spoken language from whisper's probabilities, preferring the
+/// languages the user actually works in (`candidates`: routed languages plus
+/// English). Small general models confuse Hebrew with its neighbours (Arabic,
+/// Georgian, Yiddish); within the candidate set the right one still leads.
+/// Falls back to the global best when no candidate has a meaningful share.
+pub fn choose_language(scores: &[(String, f32)], candidates: &[String]) -> Option<(String, f32)> {
+    let best = scores.first()?.clone();
+    if candidates.is_empty() || candidates.iter().any(|c| c == &best.0) {
+        return Some(best);
+    }
+    let best_candidate = scores.iter().find(|(c, _)| candidates.contains(c)).cloned()?;
+    if best_candidate.1 >= 0.15 && best_candidate.1 >= best.1 * 0.25 {
+        Some(best_candidate)
+    } else {
+        Some(best)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn audio_ctx_scales_with_chunk_length() {
+        std::env::remove_var("TAMLIL_AUDIO_CTX");
+        assert_eq!(audio_ctx_for(1.0), Some(512));
+        assert_eq!(audio_ctx_for(8.0), Some(512));
+        assert_eq!(audio_ctx_for(12.0), Some(704));
+        assert_eq!(audio_ctx_for(20.0), Some(1088));
+        assert_eq!(audio_ctx_for(27.0), None);
+    }
+
+    #[test]
+    fn language_choice_prefers_candidates() {
+        let scores = vec![("ka".to_string(), 0.55), ("he".to_string(), 0.30), ("ar".to_string(), 0.10)];
+        let c = vec!["he".to_string(), "en".to_string()];
+        assert_eq!(choose_language(&scores, &c), Some(("he".to_string(), 0.30)));
+        let scores = vec![("fr".to_string(), 0.95), ("he".to_string(), 0.02)];
+        assert_eq!(choose_language(&scores, &c), Some(("fr".to_string(), 0.95)));
+        assert_eq!(choose_language(&scores, &[]), Some(("fr".to_string(), 0.95)));
+    }
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
     use tokio::sync::oneshot;

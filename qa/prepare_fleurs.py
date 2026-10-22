@@ -36,7 +36,10 @@ def load_index(tsv_path):
 
 def to_f32(wav_bytes, out_path):
     p = subprocess.run(
-        ["ffmpeg", "-v", "error", "-i", "pipe:0", "-f", "f32le", "-ac", "1", "-ar", "16000", "-y", out_path],
+        # Loudness-normalise to -23 LUFS (EBU R128), as the app's microphone path
+        # does before VAD; FLEURS clips vary from -9 to -65 dBFS.
+        ["ffmpeg", "-v", "error", "-i", "pipe:0", "-af", "loudnorm=I=-23:TP=-2:LRA=11",
+         "-f", "f32le", "-ac", "1", "-ar", "16000", "-y", out_path],
         input=wav_bytes, capture_output=True)
     if p.returncode != 0:
         raise RuntimeError(p.stderr.decode(errors="replace"))
