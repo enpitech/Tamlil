@@ -181,7 +181,7 @@ async fn qa_transcription_per_clip() {
     let max: usize = std::env::var("TAMLIL_QA_MAX_CLIPS").ok().and_then(|v| v.parse().ok()).unwrap_or(16);
     let engine = whisper_with(HEBREW_MODEL).await;
 
-    // Variants "label:ctx:no_timestamps:max_initial_ts" from TAMLIL_QA_WHISPER_VARIANTS
+    // Variants "label:ctx:no_timestamps:max_initial_ts[:ctx_floor]" from TAMLIL_QA_WHISPER_VARIANTS
     let variants: Vec<String> = std::env::var("TAMLIL_QA_WHISPER_VARIANTS")
         .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
         .unwrap_or_else(|_| vec!["full:full:1:1.0".to_string(), "dynamic:dynamic:1:1.0".to_string()]);
@@ -189,10 +189,11 @@ async fn qa_transcription_per_clip() {
     for variant in &variants {
     let parts: Vec<&str> = variant.split(':').collect();
     let mode = variant.as_str();
-    if parts.len() == 4 {
+    if parts.len() >= 4 {
         std::env::set_var("TAMLIL_AUDIO_CTX", parts[1]);
         std::env::set_var("TAMLIL_WHISPER_NO_TIMESTAMPS", parts[2]);
         std::env::set_var("TAMLIL_WHISPER_MAX_INITIAL_TS", parts[3]);
+        if parts.len() >= 5 { std::env::set_var("TAMLIL_AUDIO_CTX_FLOOR", parts[4]); } else { std::env::remove_var("TAMLIL_AUDIO_CTX_FLOOR"); }
     }
     let mut rows = Vec::new();
     let (mut total_errors, mut total_words, mut total_audio, mut total_time) = (0usize, 0usize, 0f32, 0f32);

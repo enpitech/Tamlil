@@ -1378,10 +1378,19 @@ pub fn audio_ctx_for(seconds: f32) -> Option<i32> {
     if seconds >= 26.0 {
         return None;
     }
+    let floor = std::env::var("TAMLIL_AUDIO_CTX_FLOOR")
+        .ok()
+        .and_then(|v| v.parse::<i32>().ok())
+        .unwrap_or(AUDIO_CTX_FLOOR);
     let needed = (seconds * 50.0).ceil() as i32 + 64; // 50 positions per second + margin
     let rounded = ((needed + 63) / 64) * 64;
-    Some(rounded.clamp(512, 1500))
+    Some(rounded.clamp(floor.clamp(256, 1500), 1500))
 }
+
+/// Smallest encoder context used for short chunks. 512 ≈ 10 s of audio
+/// context; QA on FLEURS: 512 costs ~5 WER points against the full window for
+/// ~2.8x less encoder time, 768 is the middle ground (see docs/QA.md).
+pub const AUDIO_CTX_FLOOR: i32 = 768;
 
 /// Run whisper's language head on up to 30 s of 16 kHz audio.
 fn lang_detect_with(ctx: &WhisperContext, audio: &[f32]) -> Result<(String, f32)> {
@@ -1475,9 +1484,10 @@ mod tests {
     #[test]
     fn audio_ctx_scales_with_chunk_length() {
         std::env::remove_var("TAMLIL_AUDIO_CTX");
-        assert_eq!(audio_ctx_for(1.0), Some(512));
-        assert_eq!(audio_ctx_for(8.0), Some(512));
-        assert_eq!(audio_ctx_for(12.0), Some(704));
+        std::env::remove_var("TAMLIL_AUDIO_CTX_FLOOR");
+        assert_eq!(audio_ctx_for(1.0), Some(AUDIO_CTX_FLOOR));
+        assert_eq!(audio_ctx_for(8.0), Some(AUDIO_CTX_FLOOR));
+        assert_eq!(audio_ctx_for(16.0), Some(896));
         assert_eq!(audio_ctx_for(20.0), Some(1088));
         assert_eq!(audio_ctx_for(27.0), None);
     }
