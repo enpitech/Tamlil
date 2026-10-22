@@ -5,6 +5,8 @@ import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
 import { useMemo } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { toast } from 'sonner';
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
@@ -66,6 +68,20 @@ export function TranscriptPanel({
     }));
   }, [transcripts, usePagination, segments]);
 
+  const handleRenameSpeaker = async (index: number, currentLabel: string, name: string) => {
+    try {
+      if (meetingId) {
+        await invoke('api_rename_meeting_speaker', { meetingId, oldSpeaker: currentLabel, newSpeaker: name });
+      }
+      // Remember the voice when this meeting's speakers are still in memory (just recorded)
+      invoke('speaker_id_name_speaker', { index, name }).catch(() => { /* older meeting: label only */ });
+      await onRefetchTranscripts?.();
+      toast.success(`Renamed to ${name}`);
+    } catch (err) {
+      toast.error('Could not rename speaker', { description: err instanceof Error ? err.message : String(err) });
+    }
+  };
+
   return (
     <div className="flex h-full min-w-0 w-full bg-white flex-col relative @container">
       {/* Title area */}
@@ -96,6 +112,7 @@ export function TranscriptPanel({
           totalCount={totalCount}
           loadedCount={loadedCount}
           onLoadMore={onLoadMore}
+          onRenameSpeaker={handleRenameSpeaker}
         />
       </div>
 

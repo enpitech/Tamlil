@@ -354,6 +354,24 @@ pub async fn api_get_meetings<R: Runtime>(
     }
 }
 
+/// Rename a speaker label in a saved meeting (all lines carrying `old_speaker`).
+#[tauri::command]
+pub async fn api_rename_meeting_speaker<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    old_speaker: String,
+    new_speaker: String,
+) -> Result<u64, String> {
+    let new_speaker = new_speaker.trim().to_string();
+    if new_speaker.is_empty() {
+        return Err("Speaker name must not be empty".to_string());
+    }
+    TranscriptsRepository::rename_speaker(state.db_manager.pool(), &meeting_id, &old_speaker, &new_speaker)
+        .await
+        .map_err(|e| format!("Failed to rename speaker: {}", e))
+}
+
 #[tauri::command]
 pub async fn api_search_transcripts<R: Runtime>(
     _app: AppHandle<R>,

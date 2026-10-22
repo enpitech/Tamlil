@@ -1,5 +1,7 @@
 'use client';
 
+import { useState } from 'react';
+
 /**
  * One small monster face per speaker. The set is drawn here (no external
  * assets), so it is royalty-free by construction. Each speaker index gets the
@@ -155,15 +157,68 @@ export function SpeakerAvatar({ index, label, size = 24, className = '' }: Speak
   );
 }
 
-/** Avatar plus name, used at the start of a transcript line. */
-export function SpeakerChip({ index, label, size = 22 }: { index: number; label: string; size?: number }) {
+/** Avatar plus name, used at the start of a transcript line. Click the name to rename. */
+export function SpeakerChip({
+  index,
+  label,
+  size = 22,
+  onRename,
+}: {
+  index: number;
+  label: string;
+  size?: number;
+  /** When provided, the name is editable; called with the new name. */
+  onRename?: (name: string) => void;
+}) {
   const { bg } = speakerColor(index);
-  return (
-    <span className="inline-flex items-center gap-1.5 flex-shrink-0 align-middle" title={label}>
-      <SpeakerAvatar index={index} label={label} size={size} />
-      <span className="text-xs font-semibold" style={{ color: bg === '#F6C343' || bg === '#7DD3FC' ? '#92400e' : bg }}>
-        {label}
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(label);
+  const color = bg === '#F6C343' || bg === '#7DD3FC' ? '#92400e' : bg;
+
+  const commit = () => {
+    const name = draft.trim();
+    setEditing(false);
+    if (name && name !== label && onRename) onRename(name);
+  };
+
+  if (editing) {
+    return (
+      <span className="inline-flex items-center gap-1.5 flex-shrink-0 align-middle">
+        <SpeakerAvatar index={index} label={label} size={size} />
+        <input
+          autoFocus
+          dir="auto"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commit();
+            if (e.key === 'Escape') { setDraft(label); setEditing(false); }
+          }}
+          onClick={(e) => e.stopPropagation()}
+          className="h-6 w-36 rounded border border-gray-300 px-1.5 text-xs font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-300"
+          placeholder="Name this speaker"
+          aria-label="Speaker name"
+        />
       </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1.5 flex-shrink-0 align-middle" title={onRename ? `${label} — click to rename` : label}>
+      <SpeakerAvatar index={index} label={label} size={size} />
+      {onRename ? (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setDraft(label); setEditing(true); }}
+          className="text-xs font-semibold hover:underline"
+          style={{ color }}
+        >
+          {label}
+        </button>
+      ) : (
+        <span className="text-xs font-semibold" style={{ color }}>{label}</span>
+      )}
     </span>
   );
 }

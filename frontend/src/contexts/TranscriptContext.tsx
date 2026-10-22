@@ -7,6 +7,7 @@ import { useRecordingState } from './RecordingStateContext';
 import { transcriptService } from '@/services/transcriptService';
 import { recordingService } from '@/services/recordingService';
 import { indexedDBService } from '@/services/indexedDBService';
+import { listen } from '@tauri-apps/api/event';
 
 interface TranscriptContextType {
   transcripts: Transcript[];
@@ -20,6 +21,8 @@ interface TranscriptContextType {
   clearTranscripts: () => void;
   currentMeetingId: string | null;
   markMeetingAsSaved: () => Promise<void>;
+  /** Apply a new label to every line of a speaker index (live view). */
+  renameSpeaker: (index: number, name: string) => void;
 }
 
 const TranscriptContext = createContext<TranscriptContextType | undefined>(undefined);
@@ -515,8 +518,22 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     }
   }, [currentMeetingId]);
 
+  const renameSpeaker = useCallback((index: number, name: string) => {
+    setTranscripts(prev => prev.map(t => (t.speaker_index === index ? { ...t, speaker: name } : t)));
+  }, []);
+
+  // Backend recognised a remembered voice (or the user named one): relabel earlier lines
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<{ index: number; label: string }>('speaker-renamed', (event) => {
+      renameSpeaker(event.payload.index, event.payload.label);
+    }).then((fn) => { unlisten = fn; });
+    return () => { if (unlisten) unlisten(); };
+  }, [renameSpeaker]);
+
   const value: TranscriptContextType = {
     transcripts,
+    renameSpeaker,
     transcriptsRef,
     addTranscript,
     copyTranscript,

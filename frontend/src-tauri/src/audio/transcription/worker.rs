@@ -209,6 +209,10 @@ pub fn start_transcription_task<R: Runtime>(
                                         let speaker = speaker_audio
                                             .as_ref()
                                             .and_then(|(audio, device)| crate::speaker_id::identify(audio, device.clone()));
+                                        if let Some(s) = speaker.as_ref().filter(|s| s.relabeled) {
+                                            // A remembered voice was recognised: earlier lines with this index get the name
+                                            let _ = app_clone.emit("speaker-renamed", s);
+                                        }
                                         // PERFORMANCE: Only log transcription results, not every processing step
                                         info!("✅ Worker {} transcribed: {} (confidence: {}, partial: {})",
                                               worker_id, transcript, confidence_str, is_partial);

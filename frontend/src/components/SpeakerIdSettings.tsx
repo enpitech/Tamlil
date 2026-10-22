@@ -16,6 +16,13 @@ interface SpeakerIdStatus {
   model_size_mb: number;
 }
 
+interface VoiceProfile {
+  id: string;
+  name: string;
+  samples: number;
+  updated_at: string;
+}
+
 const STORAGE_KEY = 'tamlil.speakerId.enabled';
 
 /** Persisted preference, synced to the backend on startup by ConfigContext-style callers. */
@@ -32,13 +39,36 @@ export function SpeakerIdSettings() {
   const [status, setStatus] = useState<SpeakerIdStatus | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [profiles, setProfiles] = useState<VoiceProfile[]>([]);
 
   const refresh = async () => {
     try {
       const s = await invoke<SpeakerIdStatus>('speaker_id_get_status');
       setStatus(s);
+      const list = await invoke<VoiceProfile[]>('speaker_profiles_list');
+      setProfiles(list);
     } catch (err) {
       console.error('speaker_id_get_status failed', err);
+    }
+  };
+
+  const forgetVoice = async (id: string, name: string) => {
+    try {
+      await invoke('speaker_profiles_delete', { id });
+      setProfiles((p) => p.filter((v) => v.id !== id));
+      toast.success(`Forgot ${name}'s voice`);
+    } catch (err) {
+      toast.error('Could not remove voice', { description: err instanceof Error ? err.message : String(err) });
+    }
+  };
+
+  const forgetAll = async () => {
+    try {
+      await invoke('speaker_profiles_clear');
+      setProfiles([]);
+      toast.success('All remembered voices removed');
+    } catch (err) {
+      toast.error('Could not remove voices', { description: err instanceof Error ? err.message : String(err) });
     }
   };
 
@@ -143,6 +173,42 @@ export function SpeakerIdSettings() {
           </button>
         </div>
       )}
+
+      <div className="border-t border-gray-100 pt-3">
+        <div className="flex items-center justify-between">
+          <h5 className="text-xs font-semibold text-gray-800">Remembered voices</h5>
+          {profiles.length > 0 && (
+            <button type="button" className="text-xs text-gray-400 hover:text-red-600" onClick={forgetAll}>
+              Forget all
+            </button>
+          )}
+        </div>
+        <p className="mt-1 text-xs text-gray-500">
+          Click a speaker’s name in a transcript to name them. Their voice is then saved to a local file on this
+          device and recognised in future meetings. Nothing is uploaded.
+        </p>
+        {profiles.length > 0 && (
+          <ul className="mt-2 divide-y divide-gray-100 rounded-md border border-gray-100">
+            {profiles.map((p, i) => (
+              <li key={p.id} className="flex items-center justify-between gap-2 px-2 py-1.5 text-xs">
+                <span className="flex items-center gap-2 min-w-0">
+                  <SpeakerAvatar index={i + 1} label={p.name} size={20} />
+                  <span className="truncate font-medium text-gray-800" dir="auto">{p.name}</span>
+                  <span className="text-gray-400">{p.samples} clip{p.samples === 1 ? '' : 's'}</span>
+                </span>
+                <button
+                  type="button"
+                  className="text-gray-400 hover:text-red-600"
+                  title="Forget this voice"
+                  onClick={() => forgetVoice(p.id, p.name)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

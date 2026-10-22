@@ -10,6 +10,7 @@ import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { ModalType } from '@/hooks/useModalState';
 import { useIsLinux } from '@/hooks/usePlatform';
 import { useMemo } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 
 /**
  * TranscriptPanel Component
@@ -31,7 +32,7 @@ export function TranscriptPanel({
   showModal
 }: TranscriptPanelProps) {
   // Contexts
-  const { transcripts, transcriptContainerRef, copyTranscript } = useTranscripts();
+  const { transcripts, transcriptContainerRef, copyTranscript, renameSpeaker } = useTranscripts();
   const { transcriptModelConfig } = useConfig();
   const { isRecording, isPaused } = useRecordingState();
   const { checkPermissions, isChecking, hasSystemAudio, hasMicrophone } = usePermissionCheck();
@@ -45,9 +46,19 @@ export function TranscriptPanel({
       endTime: t.audio_end_time,
       text: t.text,
       confidence: t.confidence,
+      speaker: t.speaker,
+      speakerIndex: t.speaker_index,
     })),
     [transcripts]
   );
+
+  const handleRenameSpeaker = (index: number, _currentLabel: string, name: string) => {
+    renameSpeaker(index, name);
+    invoke('speaker_id_name_speaker', { index, name }).catch((err) =>
+      console.warn('Could not remember this voice:', err)
+    );
+  };
+
 
   return (
     <div ref={transcriptContainerRef} className="w-full border-r border-gray-200 bg-white flex flex-col overflow-y-auto">
@@ -113,6 +124,7 @@ export function TranscriptPanel({
               isStopping={isStopping}
               enableStreaming={isRecording}
               showConfidence={true}
+              onRenameSpeaker={handleRenameSpeaker}
             />
           </div>
         </div>

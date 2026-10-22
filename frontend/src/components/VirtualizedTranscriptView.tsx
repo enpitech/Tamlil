@@ -35,6 +35,8 @@ export interface VirtualizedTranscriptViewProps {
     totalCount?: number;
     loadedCount?: number;
     onLoadMore?: () => void;
+    /** Rename a speaker (index, current label, new name). Enables click-to-rename on chips. */
+    onRenameSpeaker?: (index: number, currentLabel: string, name: string) => void;
 }
 
 // Threshold for enabling virtualization (below this, use simple rendering)
@@ -74,6 +76,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     showConfidence,
     speaker,
     speakerIndex,
+    onRenameSpeaker,
 }: {
     id: string;
     timestamp: number;
@@ -83,6 +86,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     showConfidence: boolean;
     speaker?: string;
     speakerIndex?: number;
+    onRenameSpeaker?: (index: number, currentLabel: string, name: string) => void;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
 
@@ -104,7 +108,11 @@ const TranscriptSegment = memo(function TranscriptSegment({
                 <div className="flex-1">
                     {speaker && speakerIndex !== undefined && (
                         <div className="mb-0.5">
-                            <SpeakerChip index={speakerIndex} label={speaker} />
+                            <SpeakerChip
+                                index={speakerIndex}
+                                label={speaker}
+                                onRename={onRenameSpeaker ? (name) => onRenameSpeaker(speakerIndex, speaker, name) : undefined}
+                            />
                         </div>
                     )}
                     {isStreaming ? (
@@ -133,6 +141,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     isLoadingMore = false,
     totalCount = 0,
     loadedCount = 0,
+    onRenameSpeaker,
     onLoadMore,
 }) => {
     // Create scroll ref first - shared between virtualizer and auto-scroll hook
@@ -308,6 +317,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         showConfidence={showConfidence}
                                         speaker={segment.speaker}
                                         speakerIndex={segment.speakerIndex}
+                                        onRenameSpeaker={onRenameSpeaker}
                                     />
                                 </div>
                             );
@@ -366,6 +376,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         showConfidence={showConfidence}
                                         speaker={segment.speaker}
                                         speakerIndex={segment.speakerIndex}
+                                        onRenameSpeaker={onRenameSpeaker}
                                     />
                                 </motion.div>
                             );

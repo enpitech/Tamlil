@@ -99,3 +99,36 @@ pub async fn speaker_id_delete_model() -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Name a speaker of the current recording and remember the voice for future
+/// meetings. Emits `speaker-renamed` so open views update earlier lines.
+#[tauri::command]
+pub async fn speaker_id_name_speaker<R: Runtime>(
+    app: AppHandle<R>,
+    index: u32,
+    name: String,
+) -> Result<super::SpeakerLabel, String> {
+    let label = super::name_speaker(index, &name).map_err(|e| e.to_string())?;
+    let _ = app.emit("speaker-renamed", &label);
+    Ok(label)
+}
+
+#[tauri::command]
+pub async fn speaker_profiles_list() -> Result<Vec<super::profiles::VoiceProfileSummary>, String> {
+    Ok(super::profiles::with(|s| s.list()).unwrap_or_default())
+}
+
+#[tauri::command]
+pub async fn speaker_profiles_rename(id: String, name: String) -> Result<(), String> {
+    super::profiles::with_mut(|s| s.rename(&id, &name)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn speaker_profiles_delete(id: String) -> Result<(), String> {
+    super::profiles::with_mut(|s| s.delete(&id)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn speaker_profiles_clear() -> Result<(), String> {
+    super::profiles::with_mut(|s| s.clear()).map_err(|e| e.to_string())
+}

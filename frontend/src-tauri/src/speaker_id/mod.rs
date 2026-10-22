@@ -11,6 +11,7 @@
 
 pub mod commands;
 pub mod fbank;
+pub mod profiles;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -40,6 +41,11 @@ const SAME_SPEAKER_THRESHOLD: f32 = 0.55;
 const MIN_SECONDS_FOR_NEW_SPEAKER: f32 = 1.5;
 /// Hard cap so noise cannot create endless speakers.
 const MAX_SPEAKERS: usize = 12;
+/// Similarity needed to label a voice with a remembered (named) profile.
+const PROFILE_MATCH_THRESHOLD: f32 = 0.6;
+/// Re-check unnamed speakers against remembered voices once their centroid
+/// has this many clips (early guesses are noisy).
+const PROFILE_RECHECK_AT: &[u32] = &[3, 6, 12];
 
 static MODELS_DIR: OnceLock<PathBuf> = OnceLock::new();
 static ENABLED: AtomicBool = AtomicBool::new(true);
@@ -52,6 +58,47 @@ pub fn init(app_data_dir: &Path) {
         log::warn!("Could not create speaker models dir {}: {}", dir.display(), e);
     }
     let _ = MODELS_DIR.set(dir);
+    profiles::init(app_data_dir);
+}
+
+/// Name the speaker with this index in the current recording and remember the
+/// voice. Returns the new label for the index.
+pub fn name_speaker(index: u32, name: &str) -> Result<SpeakerLabel> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(anyhow!("Name must not be empty"));
+    }
+    let mut guard = TRACKER.lock().map_err(|_| anyhow!("Speaker tracker poisoned"))?;
+    let tracker = guard
+        .as_mut()
+        .ok_or_else(|| anyhow!("No speakers in the current recording"))?;
+    let speaker = tracker
+        .speakers
+        .get(index as usize)
+        .cloned()
+        .ok_or_else(|| anyhow!("Speaker {} not found in the current recording", index))?;
+    let profile = profiles::with_mut(|store| store.upsert_named(name, &speaker.centroid, speaker.count))?;
+    let speaker = &mut tracker.speakers[index as usize];
+    speaker.label = profile.name.clone();
+    speaker.profile_id = Some(profile.id);
+    Ok(SpeakerLabel { index, label: speaker.label.clone(), confidence: 1.0, relabeled: true })
+}
+
+/// Current label of every speaker in the recording.
+pub fn current_labels() -> Vec<SpeakerLabel> {
+    TRACKER
+        .lock()
+        .ok()
+        .and_then(|g| {
+            g.as_ref().map(|t| {
+                t.speakers
+                    .iter()
+                    .enumerate()
+                    .map(|(i, s)| SpeakerLabel { index: i as u32, label: s.label.clone(), confidence: 1.0, relabeled: false })
+                    .collect()
+            })
+        })
+        .unwrap_or_default()
 }
 
 pub fn models_dir() -> Option<PathBuf> {
@@ -232,6 +279,10 @@ pub struct SpeakerLabel {
     pub label: String,
     /// Similarity to the matched centroid (1.0 for a brand-new speaker).
     pub confidence: f32,
+    /// The label of this index just changed (matched a remembered voice or was
+    /// named by the user); earlier lines with this index should be updated.
+    #[serde(default)]
+    pub relabeled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -239,6 +290,15 @@ struct Speaker {
     centroid: Vec<f32>,
     count: u32,
     label: String,
+    /// Remembered voice this speaker was matched to or saved as.
+    profile_id: Option<String>,
+}
+
+fn remembered_voice(embedding: &[f32]) -> Option<profiles::VoiceProfile> {
+    profiles::with(|store| store.best_match(embedding))
+        .flatten()
+        .filter(|(_, sim)| *sim >= PROFILE_MATCH_THRESHOLD)
+        .map(|(p, _)| p)
 }
 
 #[derive(Debug, Default)]
@@ -274,30 +334,59 @@ impl SpeakerTracker {
                 };
                 self.update_centroid(idx, embedding);
                 self.last_index = Some(idx);
+                let relabeled = self.recheck_remembered(idx);
                 return SpeakerLabel {
                     index: idx as u32,
                     label: self.speakers[idx].label.clone(),
                     confidence: sim.max(0.0),
+                    relabeled,
                 };
             }
         }
 
-        // New voice
-        let label = if device == DeviceType::Microphone && !self.has_you {
+        // New voice: a remembered (named) voice wins, otherwise "You" / "Speaker N"
+        let remembered = remembered_voice(embedding)
+            .filter(|p| !self.speakers.iter().any(|s| s.profile_id.as_deref() == Some(p.id.as_str())));
+        let (label, profile_id) = if let Some(profile) = remembered {
+            (profile.name, Some(profile.id))
+        } else if device == DeviceType::Microphone && !self.has_you {
             self.has_you = true;
-            "You".to_string()
+            ("You".to_string(), None)
         } else {
             self.remote_count += 1;
-            format!("Speaker {}", self.remote_count)
+            (format!("Speaker {}", self.remote_count), None)
         };
         self.speakers.push(Speaker {
             centroid: embedding.to_vec(),
             count: 1,
             label: label.clone(),
+            profile_id,
         });
         let idx = self.speakers.len() - 1;
         self.last_index = Some(idx);
-        SpeakerLabel { index: idx as u32, label, confidence: 1.0 }
+        SpeakerLabel { index: idx as u32, label, confidence: 1.0, relabeled: false }
+    }
+
+    /// Once an unnamed speaker has enough clips, see whether the averaged voice
+    /// matches a remembered profile. Returns true when the label changed.
+    fn recheck_remembered(&mut self, idx: usize) -> bool {
+        let speaker = &self.speakers[idx];
+        if speaker.profile_id.is_some() || !PROFILE_RECHECK_AT.contains(&speaker.count) {
+            return false;
+        }
+        let Some(profile) = remembered_voice(&speaker.centroid) else {
+            return false;
+        };
+        if self.speakers.iter().any(|s| s.profile_id.as_deref() == Some(profile.id.as_str())) {
+            return false;
+        }
+        let speaker = &mut self.speakers[idx];
+        if speaker.label == "You" {
+            self.has_you = false;
+        }
+        speaker.label = profile.name;
+        speaker.profile_id = Some(profile.id);
+        true
     }
 
     fn update_centroid(&mut self, idx: usize, embedding: &[f32]) {
