@@ -606,10 +606,16 @@ jobs:
       # throwaway key so bundles still build (they are not valid updates).
       - name: Ensure an updater signing key is available
         id: signing-key
-        if: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY == '' }}
         shell: bash
         working-directory: frontend
+        env:
+          # The secrets context cannot be used in a step `if`, so decide inside the script.
+          HAS_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
         run: |
+          if [[ "$HAS_SIGNING_KEY" == "true" ]]; then
+            echo "Using the TAURI_SIGNING_PRIVATE_KEY secret"
+            exit 0
+          fi
           pnpm tauri signer generate -w "$RUNNER_TEMP/ci-updater.key" --password "" --ci
           {
             echo "CI_TAURI_SIGNING_PRIVATE_KEY<<EOF_KEY"
