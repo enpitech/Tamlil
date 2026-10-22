@@ -167,11 +167,25 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: List downloads
+      - name: List downloads and create stable-name copies
         id: files
         shell: bash
         run: |
           find dist -type f | sort
+          # Stable file names so the README can link directly to the newest build
+          # regardless of the version number baked into Tauri's bundle names.
+          mkdir -p dist/stable
+          alias_first() { # alias_first <glob> <stable name>
+            local src
+            src=$(find dist -maxdepth 1 -type f -name "$1" | sort | head -n1)
+            if [[ -n "$src" ]]; then cp "$src" "dist/stable/$2"; echo "  $2 <- $(basename "$src")"; fi
+          }
+          alias_first '*.dmg'        'Tamlil-macos-arm64.dmg'
+          alias_first '*.app.tar.gz' 'Tamlil-macos-arm64.app.tar.gz'
+          alias_first '*.msi'        'Tamlil-windows-x64.msi'
+          alias_first '*.exe'        'Tamlil-windows-x64-setup.exe'
+          alias_first '*.deb'        'Tamlil-linux-x64.deb'
+          alias_first '*.AppImage'   'Tamlil-linux-x64.AppImage'
           COUNT=$(find dist -type f \( -name '*.dmg' -o -name '*.app.tar.gz' -o -name '*.msi' -o -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.sig' \) | wc -l)
           echo "count=$COUNT" >> "$GITHUB_OUTPUT"
 

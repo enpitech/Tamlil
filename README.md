@@ -13,6 +13,20 @@ Tamlil is a fork of [Meetily](https://github.com/Zackriya-Solutions/meeting-minu
 - **Right-to-left text.** Transcript lines, meeting titles and the summary editor resolve their direction per paragraph, so Hebrew and mixed Hebrew/English content reads correctly.
 - **No telemetry.** The upstream PostHog analytics (Rust client, consent UI and event tracking) are removed. The app only talks to the network to download models and to the AI providers you configure.
 
+## Downloads
+
+Latest build from `main`, refreshed by CI on every push. These are unsigned development builds; versioned, signed releases are on the [Releases page](https://github.com/enpitech/Tamlil/releases).
+
+| Platform | Download |
+| --- | --- |
+| macOS (Apple Silicon) | [Tamlil-macos-arm64.dmg](https://github.com/enpitech/Tamlil/releases/download/latest/Tamlil-macos-arm64.dmg) |
+| Windows (x64) | [Tamlil-windows-x64-setup.exe](https://github.com/enpitech/Tamlil/releases/download/latest/Tamlil-windows-x64-setup.exe) · [Tamlil-windows-x64.msi](https://github.com/enpitech/Tamlil/releases/download/latest/Tamlil-windows-x64.msi) |
+| Linux (x64, experimental) | [Tamlil-linux-x64.AppImage](https://github.com/enpitech/Tamlil/releases/download/latest/Tamlil-linux-x64.AppImage) · [Tamlil-linux-x64.deb](https://github.com/enpitech/Tamlil/releases/download/latest/Tamlil-linux-x64.deb) |
+
+All files for the current build, including the versioned originals and signatures: <https://github.com/enpitech/Tamlil/releases/tag/latest>.
+
+macOS first launch: the build is ad-hoc signed, so right-click the app and choose **Open**, or run `xattr -dr com.apple.quarantine /Applications/Tamlil.app`. Windows SmartScreen will warn once for unsigned installers.
+
 ## Building
 
 See [docs/UPSTREAM_README.md](docs/UPSTREAM_README.md) and [frontend/README.md](frontend/README.md). In short:
@@ -37,7 +51,8 @@ Tamlil inherits Meetily's platform support: macOS on Apple Silicon is the primar
 `.github/workflows/ci.yml` runs on every push and pull request to `main`:
 
 1. **check** (Linux): Rust unit tests for the Tauri crate and `llama-helper`, TypeScript type-check.
-2. **build**: unsigned bundles for macOS (Apple Silicon) and Windows through the shared `build.yml`, uploaded as workflow artifacts (`tamlil-ci-*`).
+2. **build**: unsigned bundles for macOS (Apple Silicon), Windows and Linux through the shared `build.yml`, uploaded as workflow artifacts (`tamlil-ci-*`).
+3. **publish** (pushes to `main` only): refreshes the rolling `latest` pre-release with every bundle that was built, plus stable-named copies for the download links above.
 
 `release.yml` (manual) creates a draft GitHub release with signed, notarised builds. Secrets it expects:
 
