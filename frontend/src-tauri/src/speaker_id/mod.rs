@@ -44,8 +44,14 @@ pub const MODEL_BYTES: u64 = 29_292_449;
 /// few seconds typically score 0.5-0.8 with CAM++, different speakers 0.0-0.3.
 const SAME_SPEAKER_THRESHOLD: f32 = 0.45;
 /// Shorter chunks are too unreliable to open a new speaker; they attach to the
-/// closest existing one (or the previous speaker when nothing is close).
+/// closest existing one (or the previous speaker when nothing is close) unless
+/// they are clearly nobody we know (see `CLEARLY_NEW_THRESHOLD`).
 const MIN_SECONDS_FOR_NEW_SPEAKER: f32 = 2.5;
+/// A chunk at least this long may open a new speaker when its similarity to
+/// every known voice is below `CLEARLY_NEW_THRESHOLD` (different speakers score
+/// 0.0-0.3 on CAM++; same speaker rarely below 0.4).
+const MIN_SECONDS_FOR_CLEARLY_NEW: f32 = 1.2;
+const CLEARLY_NEW_THRESHOLD: f32 = 0.25;
 /// Hard cap so noise cannot create endless speakers.
 const MAX_SPEAKERS: usize = 12;
 /// Similarity needed to label a voice with a remembered (named) profile.
@@ -436,7 +442,10 @@ impl SpeakerTracker {
             .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
         if let Some((i, sim)) = best {
-            let can_open_new = seconds >= MIN_SECONDS_FOR_NEW_SPEAKER && self.speakers.len() < MAX_SPEAKERS;
+            let room = self.speakers.len() < MAX_SPEAKERS;
+            let can_open_new = room
+                && (seconds >= MIN_SECONDS_FOR_NEW_SPEAKER
+                    || (seconds >= MIN_SECONDS_FOR_CLEARLY_NEW && sim < CLEARLY_NEW_THRESHOLD));
             if sim >= SAME_SPEAKER_THRESHOLD || !can_open_new {
                 // Short or similar enough: attach to the closest voice, unless it is
                 // plainly a different person and we have a previous speaker to fall back on.
@@ -445,7 +454,11 @@ impl SpeakerTracker {
                 } else {
                     self.last_index.unwrap_or(i)
                 };
-                self.update_centroid(idx, embedding);
+                // Only a confident match may move the centroid; an unsure attachment
+                // keeps the label but must not drag the voice model towards a stranger.
+                if sim >= SAME_SPEAKER_THRESHOLD {
+                    self.update_centroid(idx, embedding);
+                }
                 self.last_index = Some(idx);
                 let relabeled = self.recheck_remembered(idx);
                 return SpeakerLabel {
@@ -600,6 +613,23 @@ mod tests {
         assert!(profiles::is_me_alias(" Me "));
         assert!(profiles::is_me_alias("אני"));
         assert!(!profiles::is_me_alias("Dana"));
+    }
+
+    #[test]
+    fn short_but_clearly_different_voice_opens_a_speaker_without_polluting() {
+        let mut t = SpeakerTracker::with_mic_guess(false);
+        let a = unit(&[1.0, 0.0, 0.0]);
+        let b = unit(&[0.0, 1.0, 0.0]);
+        assert_eq!(t.assign(&a, DeviceType::System, 3.0).label, "Speaker 1");
+        // 1.5 s of a voice orthogonal to Speaker 1: clearly new, gets its own label
+        assert_eq!(t.assign(&b, DeviceType::System, 1.5).label, "Speaker 2");
+        // 0.8 s of an unknown voice attaches to the previous speaker but leaves its centroid alone
+        let c = unit(&[0.0, 0.0, 1.0]);
+        let before = t.speakers[1].centroid.clone();
+        let l = t.assign(&c, DeviceType::System, 0.8);
+        assert_eq!(l.index, 1);
+        assert_eq!(t.speakers[1].centroid, before);
+        assert_eq!(t.speaker_count(), 2);
     }
 
     #[test]
