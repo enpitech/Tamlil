@@ -65,3 +65,38 @@ python3 qa/summary_probe.py --helper llama-helper/target/release/llama-helper \
   male voices never share a label; at most a couple of spurious labels.
 - Summary: Hebrew ratio ≥ 0.85, the four headings present, no reasoning
   markers, the named people and decisions appear.
+
+## Findings so far (2026-10-23)
+
+Measured on GitHub's macOS arm64 runner (M1, paravirtual Metal with most
+kernels unsupported, so close to CPU speed) and on Linux x64; ivrit.ai
+large-v3-turbo, 10 FLEURS Hebrew clips (85 s) and an 8-clip simulated meeting.
+
+| Setting | WER per clip | WER meeting | RTF (macOS runner) |
+|---|---|---|---|
+| Full 30 s encoder window (upstream) | 23.8% | 25.0% | 1.93 |
+| Chunk-sized context, floor 512 | 28.7% | 25.0% | 0.87 |
+| **Chunk-sized context, floor 768 (shipped)** | 25.6% | 22.0% | 0.88 |
+| Timestamps on (`no_timestamps=false`) | worse by 3-4 points and slower | | |
+
+Other conclusions:
+
+- The Hebrew fine-tune answers "he" for any language with confidence 1.00;
+  language identification must use a general model (`base`, 8/8 correct with
+  the choice restricted to the user's languages + English; raw argmax 7/8).
+- Speaker embeddings: fbank is bit-exact with Kaldi; the bundled onnxruntime
+  corrupts CAM++ output at any graph-optimisation level above `Disable`
+  (cosine to reference 0.04-0.5 vs 1.000). With optimisation off: same speaker
+  0.55-0.89, different speakers at most 0.31; thresholds 0.45 (cluster) and
+  0.5 (remembered voice). Short clearly-different utterances (≥1.2 s, <0.25
+  similarity) may open a speaker; unsure matches never move a centroid. Result:
+  no cross-gender merges, halves of a clip consistent 9-10/10.
+- Gemma 4 E4B (q4_0) summarises in Hebrew: ratio 0.997, 4/4 sections, 5/6
+  facts, ~100-120 s generation on a 4-core CPU. Its embedded chat template is
+  rejected by llama.cpp; the app uses the Gemma 3 format and llama-helper falls
+  back by template markers.
+- Test audio must be loudness-normalised like the app's mic path (-23 LUFS):
+  raw FLEURS clips range from -9 to -65 dBFS and starve the VAD.
+- `pre_speech_pad` above ~500 ms panics inside silero-rs; keep 300 ms.
+- CI speed numbers are not Mac speed: a real Apple Silicon GPU runs the encoder
+  many times faster. Run the suite locally on the target Mac for RTF.

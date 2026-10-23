@@ -439,8 +439,10 @@ async fn qa_speaker_identification() {
         embed_time * 1000.0, stats(&same), stats(&diff), tracker.speaker_count(), purity * 100.0, unassigned,
         purity_lines.join("\n"), you, mic_total
     ));
-    assert!(purity >= 0.75, "same-clip consistency {:.0}%", purity * 100.0);
-    assert!(tracker.speaker_count() <= 4, "too many speakers: {}", tracker.speaker_count());
+    // FLEURS clips of one gender come from several real speakers, so more than two
+    // labels is legitimate; what must hold is no cross-gender merge and stable halves.
+    assert!(purity >= 0.8, "same-clip consistency {:.0}%", purity * 100.0);
+    assert!(tracker.speaker_count() <= 8, "too many speakers: {}", tracker.speaker_count());
     assert!(crossed.is_empty(), "female and male voices share labels: {:?}", crossed);
     assert_eq!(you, mic_total, "mic-is-me must label every mic segment You");
 }
