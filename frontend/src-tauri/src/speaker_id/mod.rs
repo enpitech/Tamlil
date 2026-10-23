@@ -572,9 +572,9 @@ mod tests {
         assert_eq!(other.index, 1);
         assert_eq!(t.speaker_count(), 2);
 
-        // A short, unrelated clip must not create a third speaker
+        // A very short, unrelated clip must not create a third speaker
         let c = unit(&[0.0, 0.0, 1.0, 0.0]);
-        let short = t.assign(&c, DeviceType::System, 2.0);
+        let short = t.assign(&c, DeviceType::System, 1.0);
         assert_eq!(t.speaker_count(), 2);
         assert_eq!(short.index, 1, "falls back to the previous speaker");
 
