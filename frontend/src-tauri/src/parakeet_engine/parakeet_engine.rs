@@ -1332,6 +1332,10 @@ mod tests {
         description: "test model",
         source_base_url: "",
         artifacts: SMALL_ARTIFACTS,
+        family: ModelFamily::ParakeetTdt,
+        display_name: "test",
+        languages: &[],
+        experimental: false,
     }];
 
     struct ExpectedResponse {
