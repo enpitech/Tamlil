@@ -1,0 +1,247 @@
+[1m[33mwarning[0m: patch for the non root package will be ignored, specify patch at the workspace root:
+package:   /home/runner/work/Tamlil/Tamlil/frontend/src-tauri/Cargo.toml
+workspace: /home/runner/work/Tamlil/Tamlil/Cargo.toml
+[1m[33mwarning[0m: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /home/runner/work/Tamlil/Tamlil/llama-helper/Cargo.toml
+workspace: /home/runner/work/Tamlil/Tamlil/Cargo.toml
+[1m[33mwarning[0m[1m: unused import: `std::io::Read`[0m
+   [1m[94m--> [0mfrontend/src-tauri/build/ffmpeg.rs:210:9
+    [1m[94m|[0m
+[1m[94m210[0m [1m[94m|[0m     use std::io::Read;
+    [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+[1m[33mwarning[0m: `tamlil` (build script) generated 1 warning
+[1m[92m   Compiling[0m tamlil v0.4.1 (/home/runner/work/Tamlil/Tamlil/frontend/src-tauri)
+[1m[33mwarning[0m: tamlil@0.4.1: 🚀 Building Tamlil for: linux
+[1m[33mwarning[0m: tamlil@0.4.1: ⚠️  Linux: Using CPU-only mode (no GPU or BLAS acceleration)
+[1m[33mwarning[0m: tamlil@0.4.1: 💡 For NVIDIA GPU: cargo build --release --features cuda
+[1m[33mwarning[0m: tamlil@0.4.1: 💡 For AMD GPU: cargo build --release --features hipblas
+[1m[33mwarning[0m: tamlil@0.4.1: 💡 For other GPUs: cargo build --release --features vulkan
+[1m[33mwarning[0m: tamlil@0.4.1: 💡 For CPU optimization: cargo build --release --features openblas
+[1m[33mwarning[0m: tamlil@0.4.1: 📊 Performance: CPU-only builds are significantly slower than GPU/BLAS builds
+[1m[33mwarning[0m: tamlil@0.4.1: 📚 See README.md for GPU/BLAS setup instructions
+[1m[33mwarning[0m: tamlil@0.4.1: 🎬 Checking FFmpeg binary for target: x86_64-unknown-linux-gnu
+[1m[33mwarning[0m: tamlil@0.4.1: 🔍 Found cached FFmpeg binary: ffmpeg-x86_64-unknown-linux-gnu
+[1m[33mwarning[0m: tamlil@0.4.1: ✅ FFmpeg verification passed: ffmpeg version 7.0.2-static https://johnvansickle.com/ffmpeg/  Copyright (c) 2000-2024 the FFmpeg developers
+[1m[33mwarning[0m: tamlil@0.4.1: ✅ FFmpeg binary already cached and verified: ffmpeg-x86_64-unknown-linux-gnu
+[1m[33mwarning[0m[1m: unused import: `perf_debug`[0m
+  [1m[94m--> [0mfrontend/src-tauri/src/lib.rs:32:16
+   [1m[94m|[0m
+[1m[94m32[0m [1m[94m|[0m pub(crate) use perf_debug;
+   [1m[94m|[0m                [1m[33m^^^^^^^^^^[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mnote[0m: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+[1m[33mwarning[0m[1m: unused import: `perf_trace`[0m
+  [1m[94m--> [0mfrontend/src-tauri/src/lib.rs:33:16
+   [1m[94m|[0m
+[1m[94m33[0m [1m[94m|[0m pub(crate) use perf_trace;
+   [1m[94m|[0m                [1m[33m^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: variable does not need to be mutable[0m
+   [1m[94m--> [0mfrontend/src-tauri/src/audio/recording_preferences.rs:111:16
+    [1m[94m|[0m
+[1m[94m111[0m [1m[94m|[0m             Ok(mut p) => {
+    [1m[94m|[0m                [1m[94m----[0m[1m[33m^[0m
+    [1m[94m|[0m                [1m[94m|[0m
+    [1m[94m|[0m                [1m[94mhelp: remove this `mut`[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+[1m[33mwarning[0m[1m: unused variable: `error`[0m
+   [1m[94m--> [0mfrontend/src-tauri/src/summary/service.rs:657:17
+    [1m[94m|[0m
+[1m[94m657[0m [1m[94m|[0m             Err(error) if cancellation_token.is_cancelled() => {
+    [1m[94m|[0m                 [1m[33m^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_error`[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+[1m[33mwarning[0m[1m: unused variable: `error`[0m
+   [1m[94m--> [0mfrontend/src-tauri/src/summary/processor.rs:461:33
+    [1m[94m|[0m
+[1m[94m461[0m [1m[94m|[0m [1m[94m...[0m                   Err(error)
+    [1m[94m|[0m                           [1m[33m^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_error`[0m
+
+[1m[33mwarning[0m[1m: field `recording_sender` is never read[0m
+   [1m[94m--> [0mfrontend/src-tauri/src/audio/pipeline.rs:214:5
+    [1m[94m|[0m
+[1m[94m207[0m [1m[94m|[0m pub struct AudioCapture {
+    [1m[94m|[0m            [1m[94m------------[0m [1m[94mfield in this struct[0m
+[1m[94m...[0m
+[1m[94m214[0m [1m[94m|[0m     recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
+    [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: `AudioCapture` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+    [1m[94m= [0m[1mnote[0m: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+[1m[33mwarning[0m[1m: field `state` is never read[0m
+   [1m[94m--> [0mfrontend/src-tauri/src/audio/pipeline.rs:696:5
+    [1m[94m|[0m
+[1m[94m693[0m [1m[94m|[0m pub struct AudioPipeline {
+    [1m[94m|[0m            [1m[94m-------------[0m [1m[94mfield in this struct[0m
+[1m[94m...[0m
+[1m[94m696[0m [1m[94m|[0m     state: Arc<RecordingState>,
+    [1m[94m|[0m     [1m[33m^^^^^[0m
+
+[1m[33mwarning[0m[1m: associated function `has_windows_vulkan_loader` is never used[0m
+   [1m[94m--> [0mfrontend/src-tauri/src/audio/hardware_detector.rs:199:8
+    [1m[94m|[0m
+[1m[94m 51[0m [1m[94m|[0m impl HardwareProfile {
+    [1m[94m|[0m [1m[94m--------------------[0m [1m[94massociated function in this implementation[0m
+[1m[94m...[0m
+[1m[94m199[0m [1m[94m|[0m     fn has_windows_vulkan_loader(system_root: &Path) -> bool {
+    [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: function `mel_banks` is never used[0m
+  [1m[94m--> [0mfrontend/src-tauri/src/speaker_id/fbank.rs:23:4
+   [1m[94m|[0m
+[1m[94m23[0m [1m[94m|[0m fn mel_banks() -> Vec<Vec<(usize, f32)>> {
+   [1m[94m|[0m    [1m[33m^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: function `get_builtin_templates` is never used[0m
+  [1m[94m--> [0mfrontend/src-tauri/src/summary/templates/defaults.rs:15:8
+   [1m[94m|[0m
+[1m[94m15[0m [1m[94m|[0m pub fn get_builtin_templates() -> Vec<(&'static str, &'static str)> {
+   [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m: `tamlil` (lib) generated 10 warnings (run `cargo fix --lib -p tamlil` to apply 5 suggestions)
+[1m[92m    Finished[0m `release` profile [optimized] target(s) in 2m 10s
+[1m[92m     Running[0m tests/qa_e2e.rs (/home/runner/work/Tamlil/Tamlil/target/release/deps/qa_e2e-d82e08b61674145c)
+
+running 7 tests
+test qa_dump_fbank ... 
+thread 'qa_dump_fbank' (5345) panicked at frontend/src-tauri/tests/qa_e2e.rs:61:58:
+/Users/runner/work/Tamlil/Tamlil/qa-data/he_il-1620.f32: No such file or directory (os error 2)
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+   1: core::panicking::panic_fmt
+   2: qa_e2e::load_clips::{closure#0}
+   3: qa_e2e::load_clips
+   4: qa_e2e::qa_dump_fbank::{closure#0}
+   5: <tokio::runtime::scheduler::current_thread::Context>::enter::<core::task::poll::Poll<()>, <tokio::runtime::scheduler::current_thread::CoreGuard>::block_on<core::pin::Pin<&mut core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>>::{closure#0}::{closure#0}>
+   6: <std::thread::local::LocalKey<tokio::runtime::context::Context>>::with::<tokio::runtime::context::set_scheduler<(alloc::boxed::Box<tokio::runtime::scheduler::current_thread::Core>, core::option::Option<()>), <tokio::runtime::scheduler::current_thread::CoreGuard>::enter<<tokio::runtime::scheduler::current_thread::CoreGuard>::block_on<core::pin::Pin<&mut core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>>::{closure#0}, core::option::Option<()>>::{closure#0}>::{closure#0}, (alloc::boxed::Box<tokio::runtime::scheduler::current_thread::Core>, core::option::Option<()>)>
+   7: <tokio::runtime::scheduler::current_thread::CoreGuard>::block_on::<core::pin::Pin<&mut core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>>
+   8: tokio::runtime::context::runtime::enter_runtime::<<tokio::runtime::scheduler::current_thread::CurrentThread>::block_on<core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>::{closure#0}, ()>
+   9: <tokio::runtime::runtime::Runtime>::block_on::<core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>
+  10: <qa_e2e::qa_dump_fbank::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+FAILED
+test qa_dump_speaker_embeddings ... 
+thread 'qa_dump_speaker_embeddings' (5346) panicked at frontend/src-tauri/tests/qa_e2e.rs:61:58:
+/Users/runner/work/Tamlil/Tamlil/qa-data/he_il-1620.f32: No such file or directory (os error 2)
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+   1: core::panicking::panic_fmt
+   2: qa_e2e::load_clips::{closure#0}
+   3: qa_e2e::load_clips
+   4: qa_e2e::qa_dump_speaker_embeddings::{closure#0}
+   5: <tokio::runtime::scheduler::current_thread::Context>::enter::<core::task::poll::Poll<()>, <tokio::runtime::scheduler::current_thread::CoreGuard>::block_on<core::pin::Pin<&mut core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>>::{closure#0}::{closure#0}>
+   6: <std::thread::local::LocalKey<tokio::runtime::context::Context>>::with::<tokio::runtime::context::set_scheduler<(alloc::boxed::Box<tokio::runtime::scheduler::current_thread::Core>, core::option::Option<()>), <tokio::runtime::scheduler::current_thread::CoreGuard>::enter<<tokio::runtime::scheduler::current_thread::CoreGuard>::block_on<core::pin::Pin<&mut core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>>::{closure#0}, core::option::Option<()>>::{closure#0}>::{closure#0}, (alloc::boxed::Box<tokio::runtime::scheduler::current_thread::Core>, core::option::Option<()>)>
+   7: <tokio::runtime::scheduler::current_thread::CoreGuard>::block_on::<core::pin::Pin<&mut core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>>
+   8: tokio::runtime::context::runtime::enter_runtime::<<tokio::runtime::scheduler::current_thread::CurrentThread>::block_on<core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>::{closure#0}, ()>
+   9: <tokio::runtime::runtime::Runtime>::block_on::<core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>
+  10: <qa_e2e::qa_dump_speaker_embeddings::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+FAILED
+test qa_language_detection ... 
+thread 'qa_language_detection' (5347) panicked at frontend/src-tauri/tests/qa_e2e.rs:61:58:
+/Users/runner/work/Tamlil/Tamlil/qa-data/he_il-1620.f32: No such file or directory (os error 2)
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+   1: core::panicking::panic_fmt
+   2: qa_e2e::load_clips::{closure#0}
+   3: qa_e2e::load_clips
+   4: qa_e2e::qa_language_detection::{closure#0}
+   5: <tokio::runtime::scheduler::current_thread::Context>::enter::<core::task::poll::Poll<()>, <tokio::runtime::scheduler::current_thread::CoreGuard>::block_on<core::pin::Pin<&mut core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>>::{closure#0}::{closure#0}>
+   6: <std::thread::local::LocalKey<tokio::runtime::context::Context>>::with::<tokio::runtime::context::set_scheduler<(alloc::boxed::Box<tokio::runtime::scheduler::current_thread::Core>, core::option::Option<()>), <tokio::runtime::scheduler::current_thread::CoreGuard>::enter<<tokio::runtime::scheduler::current_thread::CoreGuard>::block_on<core::pin::Pin<&mut core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>>::{closure#0}, core::option::Option<()>>::{closure#0}>::{closure#0}, (alloc::boxed::Box<tokio::runtime::scheduler::current_thread::Core>, core::option::Option<()>)>
+   7: <tokio::runtime::scheduler::current_thread::CoreGuard>::block_on::<core::pin::Pin<&mut core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>>
+   8: tokio::runtime::context::runtime::enter_runtime::<<tokio::runtime::scheduler::current_thread::CurrentThread>::block_on<core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>::{closure#0}, ()>
+   9: <tokio::runtime::runtime::Runtime>::block_on::<core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>
+  10: <qa_e2e::qa_language_detection::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+FAILED
+test qa_meeting_vad_pipeline ... 
+thread 'qa_meeting_vad_pipeline' (5348) panicked at frontend/src-tauri/tests/qa_e2e.rs:61:58:
+/Users/runner/work/Tamlil/Tamlil/qa-data/he_il-1620.f32: No such file or directory (os error 2)
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+   1: core::panicking::panic_fmt
+   2: qa_e2e::load_clips::{closure#0}
+   3: qa_e2e::load_clips
+   4: qa_e2e::qa_meeting_vad_pipeline::{closure#0}
+   5: <tokio::runtime::scheduler::current_thread::Context>::enter::<core::task::poll::Poll<()>, <tokio::runtime::scheduler::current_thread::CoreGuard>::block_on<core::pin::Pin<&mut core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>>::{closure#0}::{closure#0}>
+   6: <std::thread::local::LocalKey<tokio::runtime::context::Context>>::with::<tokio::runtime::context::set_scheduler<(alloc::boxed::Box<tokio::runtime::scheduler::current_thread::Core>, core::option::Option<()>), <tokio::runtime::scheduler::current_thread::CoreGuard>::enter<<tokio::runtime::scheduler::current_thread::CoreGuard>::block_on<core::pin::Pin<&mut core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>>::{closure#0}, core::option::Option<()>>::{closure#0}>::{closure#0}, (alloc::boxed::Box<tokio::runtime::scheduler::current_thread::Core>, core::option::Option<()>)>
+   7: <tokio::runtime::scheduler::current_thread::CoreGuard>::block_on::<core::pin::Pin<&mut core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>>
+   8: tokio::runtime::context::runtime::enter_runtime::<<tokio::runtime::scheduler::current_thread::CurrentThread>::block_on<core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>::{closure#0}, ()>
+   9: <tokio::runtime::runtime::Runtime>::block_on::<core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>
+  10: <qa_e2e::qa_meeting_vad_pipeline::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+FAILED
+test qa_speaker_identification ... 
+thread 'qa_speaker_identification' (5349) panicked at frontend/src-tauri/tests/qa_e2e.rs:61:58:
+/Users/runner/work/Tamlil/Tamlil/qa-data/he_il-1620.f32: No such file or directory (os error 2)
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+   1: core::panicking::panic_fmt
+   2: qa_e2e::load_clips::{closure#0}
+   3: qa_e2e::load_clips
+   4: qa_e2e::qa_speaker_identification::{closure#0}
+   5: <tokio::runtime::scheduler::current_thread::Context>::enter::<core::task::poll::Poll<()>, <tokio::runtime::scheduler::current_thread::CoreGuard>::block_on<core::pin::Pin<&mut core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>>::{closure#0}::{closure#0}>
+   6: <std::thread::local::LocalKey<tokio::runtime::context::Context>>::with::<tokio::runtime::context::set_scheduler<(alloc::boxed::Box<tokio::runtime::scheduler::current_thread::Core>, core::option::Option<()>), <tokio::runtime::scheduler::current_thread::CoreGuard>::enter<<tokio::runtime::scheduler::current_thread::CoreGuard>::block_on<core::pin::Pin<&mut core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>>::{closure#0}, core::option::Option<()>>::{closure#0}>::{closure#0}, (alloc::boxed::Box<tokio::runtime::scheduler::current_thread::Core>, core::option::Option<()>)>
+   7: <tokio::runtime::scheduler::current_thread::CoreGuard>::block_on::<core::pin::Pin<&mut core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>>
+   8: tokio::runtime::context::runtime::enter_runtime::<<tokio::runtime::scheduler::current_thread::CurrentThread>::block_on<core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>::{closure#0}, ()>
+   9: <tokio::runtime::runtime::Runtime>::block_on::<core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>
+  10: <qa_e2e::qa_speaker_identification::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+FAILED
+test qa_transcription_per_clip ... 
+thread 'qa_transcription_per_clip' (5350) panicked at frontend/src-tauri/tests/qa_e2e.rs:61:58:
+/Users/runner/work/Tamlil/Tamlil/qa-data/he_il-1620.f32: No such file or directory (os error 2)
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+   1: core::panicking::panic_fmt
+   2: qa_e2e::load_clips::{closure#0}
+   3: qa_e2e::load_clips
+   4: qa_e2e::qa_transcription_per_clip::{closure#0}
+   5: <tokio::runtime::scheduler::current_thread::Context>::enter::<core::task::poll::Poll<()>, <tokio::runtime::scheduler::current_thread::CoreGuard>::block_on<core::pin::Pin<&mut core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>>::{closure#0}::{closure#0}>
+   6: <std::thread::local::LocalKey<tokio::runtime::context::Context>>::with::<tokio::runtime::context::set_scheduler<(alloc::boxed::Box<tokio::runtime::scheduler::current_thread::Core>, core::option::Option<()>), <tokio::runtime::scheduler::current_thread::CoreGuard>::enter<<tokio::runtime::scheduler::current_thread::CoreGuard>::block_on<core::pin::Pin<&mut core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>>::{closure#0}, core::option::Option<()>>::{closure#0}>::{closure#0}, (alloc::boxed::Box<tokio::runtime::scheduler::current_thread::Core>, core::option::Option<()>)>
+   7: <tokio::runtime::scheduler::current_thread::CoreGuard>::block_on::<core::pin::Pin<&mut core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>>
+   8: tokio::runtime::context::runtime::enter_runtime::<<tokio::runtime::scheduler::current_thread::CurrentThread>::block_on<core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>::{closure#0}, ()>
+   9: <tokio::runtime::runtime::Runtime>::block_on::<core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>
+  10: <qa_e2e::qa_transcription_per_clip::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+FAILED
+test qa_zipformer_per_clip ... 
+thread 'qa_zipformer_per_clip' (5351) panicked at frontend/src-tauri/tests/qa_e2e.rs:61:58:
+/Users/runner/work/Tamlil/Tamlil/qa-data/he_il-1620.f32: No such file or directory (os error 2)
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+   1: core::panicking::panic_fmt
+   2: qa_e2e::load_clips::{closure#0}
+   3: qa_e2e::load_clips
+   4: qa_e2e::qa_zipformer_per_clip::{closure#0}
+   5: <tokio::runtime::scheduler::current_thread::Context>::enter::<core::task::poll::Poll<()>, <tokio::runtime::scheduler::current_thread::CoreGuard>::block_on<core::pin::Pin<&mut core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>>::{closure#0}::{closure#0}>
+   6: <std::thread::local::LocalKey<tokio::runtime::context::Context>>::with::<tokio::runtime::context::set_scheduler<(alloc::boxed::Box<tokio::runtime::scheduler::current_thread::Core>, core::option::Option<()>), <tokio::runtime::scheduler::current_thread::CoreGuard>::enter<<tokio::runtime::scheduler::current_thread::CoreGuard>::block_on<core::pin::Pin<&mut core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>>::{closure#0}, core::option::Option<()>>::{closure#0}>::{closure#0}, (alloc::boxed::Box<tokio::runtime::scheduler::current_thread::Core>, core::option::Option<()>)>
+   7: <tokio::runtime::scheduler::current_thread::CoreGuard>::block_on::<core::pin::Pin<&mut core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>>
+   8: tokio::runtime::context::runtime::enter_runtime::<<tokio::runtime::scheduler::current_thread::CurrentThread>::block_on<core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>::{closure#0}, ()>
+   9: <tokio::runtime::runtime::Runtime>::block_on::<core::pin::Pin<&mut dyn core::future::future::Future<Output = ()>>>
+  10: <qa_e2e::qa_zipformer_per_clip::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+FAILED
+
+failures:
+
+failures:
+    qa_dump_fbank
+    qa_dump_speaker_embeddings
+    qa_language_detection
+    qa_meeting_vad_pipeline
+    qa_speaker_identification
+    qa_transcription_per_clip
+    qa_zipformer_per_clip
+
+test result: FAILED. 0 passed; 7 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+[1m[91merror[0m: test failed, to rerun pass `--test qa_e2e`
