@@ -130,6 +130,9 @@ pub fn start_transcription_task<R: Runtime>(
                     warn!("⚠️ Worker {} pre-validation: {} model not loaded - chunks may be skipped", worker_id, engine_name);
                 }
 
+                // Chunks waiting for the language decision (see LanguageRouter)
+                let mut held: Vec<AudioChunk> = Vec::new();
+
                 loop {
                     // Try to get a chunk to process
                     let chunk = {
@@ -137,8 +140,61 @@ pub fn start_transcription_task<R: Runtime>(
                         receiver.recv().await
                     };
 
-                    match chunk {
+                    let batch: Vec<AudioChunk> = match chunk {
                         Some(chunk) => {
+                            // Language identification + model routing on the first seconds of
+                            // speech. Chunks are held until the language is known, so the opening
+                            // seconds are transcribed by the routed model rather than the global one
+                            // (at most DETECTION_MAX_SECS of audio, then detection gives up).
+                            if language_router.pending() {
+                                if let Some(new_engine) =
+                                    language_router.observe(&chunk, &engine_clone, &app_clone).await
+                                {
+                                    engine_clone = new_engine;
+                                }
+                                if language_router.pending() {
+                                    held.push(chunk);
+                                    continue;
+                                }
+                            }
+                            let mut batch = std::mem::take(&mut held);
+                            batch.push(chunk);
+                            batch
+                        }
+                        None => {
+                            if !held.is_empty() {
+                                // The stream ended before the language was decided: transcribe
+                                // what was held with the current engine.
+                                language_router.abandon();
+                                std::mem::take(&mut held)
+                            } else {
+                            // No more chunks available
+                            if input_finished_clone.load(Ordering::SeqCst) {
+                                // Double-check that all queued chunks are actually completed
+                                let final_queued = chunks_queued_clone.load(Ordering::SeqCst);
+                                let final_completed = chunks_completed_clone.load(Ordering::SeqCst);
+
+                                if final_completed >= final_queued {
+                                    info!(
+                                        "👷 Worker {} finishing - all {}/{} chunks processed",
+                                        worker_id, final_completed, final_queued
+                                    );
+                                    break;
+                                } else {
+                                    warn!("👷 Worker {} detected potential chunk loss: {}/{} completed, waiting...", worker_id, final_completed, final_queued);
+                                    // AGGRESSIVE POLLING: Reduced from 50ms to 5ms for faster chunk detection during shutdown
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
+                                }
+                            } else {
+                                // AGGRESSIVE POLLING: Reduced from 10ms to 1ms for faster response during shutdown
+                                tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+                            }
+                            continue;
+                            }
+                        }
+                    };
+
+                    for chunk in batch {
                             // PERFORMANCE OPTIMIZATION: Reduce logging in hot path
                             // Only log every 10th chunk per worker to reduce I/O overhead
                             let should_log_this_chunk = chunk.chunk_id % 10 == 0;
@@ -177,15 +233,6 @@ pub fn start_transcription_task<R: Runtime>(
                             } else {
                                 None
                             };
-
-                            // Language identification + model routing on the first seconds of speech
-                            if language_router.pending() {
-                                if let Some(new_engine) =
-                                    language_router.observe(&chunk, &engine_clone, &app_clone).await
-                                {
-                                    engine_clone = new_engine;
-                                }
-                            }
 
                             // Transcribe with provider-agnostic approach
                             match transcribe_chunk_with_provider(
@@ -326,30 +373,6 @@ pub fn start_transcription_task<R: Runtime>(
                                 "progress_percentage": progress_percentage,
                                 "message": format!("Worker {} processing... ({}/{})", worker_id, completed, queued)
                             }));
-                        }
-                        None => {
-                            // No more chunks available
-                            if input_finished_clone.load(Ordering::SeqCst) {
-                                // Double-check that all queued chunks are actually completed
-                                let final_queued = chunks_queued_clone.load(Ordering::SeqCst);
-                                let final_completed = chunks_completed_clone.load(Ordering::SeqCst);
-
-                                if final_completed >= final_queued {
-                                    info!(
-                                        "👷 Worker {} finishing - all {}/{} chunks processed",
-                                        worker_id, final_completed, final_queued
-                                    );
-                                    break;
-                                } else {
-                                    warn!("👷 Worker {} detected potential chunk loss: {}/{} completed, waiting...", worker_id, final_completed, final_queued);
-                                    // AGGRESSIVE POLLING: Reduced from 50ms to 5ms for faster chunk detection during shutdown
-                                    tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
-                                }
-                            } else {
-                                // AGGRESSIVE POLLING: Reduced from 10ms to 1ms for faster response during shutdown
-                                tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
-                            }
-                        }
                     }
                 }
 
@@ -465,6 +488,15 @@ impl LanguageRouter {
 
     fn pending(&self) -> bool {
         self.active
+    }
+
+    /// Stop waiting for a decision (stream ended); held chunks go to the current engine.
+    fn abandon(&mut self) {
+        if self.active {
+            info!("🌐 Language identification abandoned: stream ended before a decision");
+        }
+        self.active = false;
+        self.buffer.clear();
     }
 
     /// Feed a chunk. Returns a replacement engine when routing selected a different model.
