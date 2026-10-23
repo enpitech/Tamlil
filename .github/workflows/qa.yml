@@ -73,7 +73,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: qa-models
-          key: qa-models-v1
+          key: qa-models-v2
 
       - name: Download models
         run: |
@@ -84,7 +84,12 @@ jobs:
             "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
           [ -s wespeaker-voxceleb-campplus-lm.onnx ] || curl -sSL --retry 3 -o wespeaker-voxceleb-campplus-lm.onnx \
             "https://huggingface.co/Wespeaker/wespeaker-voxceleb-campplus-LM/resolve/c5e01c6fcffcce160861e7e79782828320192b5c/voxceleb_CAM%2B%2B_LM.onnx"
-          ls -l
+          mkdir -p parakeet/ivrit-zipformer-66m-he && cd parakeet/ivrit-zipformer-66m-he
+          for f in encoder.int8.onnx decoder.int8.onnx joiner.int8.onnx tokens.txt; do
+            [ -s "$f" ] || curl -sSL --retry 3 -o "$f" \
+              "https://huggingface.co/ivrit-ai/zipformer2-66m-streaming-he/resolve/ee769a2a13b887f91572eec349458bfb0fe79e7a/sherpa-onnx/$f"
+          done
+          cd ../.. && ls -lR
 
       - name: Cache speech corpus
         uses: actions/cache@v4
