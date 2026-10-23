@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from "react"
 import { Switch } from "./ui/switch"
 import { FolderOpen } from "lucide-react"
+import { MaintenanceSettings } from "./MaintenanceSettings"
 import { invoke } from "@tauri-apps/api/core"
 import Analytics from "@/lib/analytics"
 import { useConfig, NotificationSettings } from "@/contexts/ConfigContext"
@@ -217,6 +218,8 @@ export function PreferenceSettings() {
             <strong>Note:</strong> Database and models are stored together in your application data directory for unified management.
           </p>
         </div>
+
+        <MaintenanceSettings />
       </div>
 
     </div>

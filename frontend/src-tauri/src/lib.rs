@@ -47,6 +47,7 @@ pub mod openai;
 pub mod anthropic;
 pub mod groq;
 pub mod language_routing;
+pub mod maintenance;
 pub mod model_registry;
 pub mod openrouter;
 pub mod speaker_id;
@@ -665,6 +666,9 @@ pub fn run() {
             speaker_id::commands::speaker_profiles_delete,
             speaker_id::commands::speaker_profiles_clear,
             speaker_id::commands::speaker_id_set_mic_is_me,
+            maintenance::maintenance_data_report,
+            maintenance::maintenance_reset,
+            maintenance::maintenance_uninstall,
             speaker_id::commands::speaker_profiles_set_me,
             api::api_rename_meeting_speaker,
             whisper_engine::commands::whisper_load_model,

@@ -46,6 +46,7 @@ In **Settings → Language** map each language to its transcription and summary 
 - **Platforms**: macOS on Apple Silicon (primary), Windows x64, Linux x64 (experimental). Unsigned builds: on macOS right-click → Open on first launch.
 - **Build from source**: `cd frontend && pnpm install && ./clean_run.sh`. Details and architecture in [docs/UPSTREAM_README.md](docs/UPSTREAM_README.md).
 - **CI and releases**: every push tests, bundles and refreshes the `latest` pre-release; signed versioned releases are manual. See [docs/RELEASING.md](docs/RELEASING.md).
+- **Reset or uninstall**: Settings → Preferences → *Storage, reset and uninstall* shows everything stored on the machine and can reset it (keeping the models or not) or uninstall the app completely. If the app is already gone, run `scripts/uninstall-macos.sh`, `scripts/uninstall-windows.ps1` or `scripts/uninstall-linux.sh` (`--keep-models` keeps the downloaded models).
 - **Upstream**: fork of [Meetily](https://github.com/Zackriya-Solutions/meeting-minutes) (MIT). Fork code lives in `model_registry/` and `language_routing/`; sync with `git fetch upstream main && git rebase upstream/main`.
 
 ## Credits
