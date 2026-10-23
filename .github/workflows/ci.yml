@@ -99,9 +99,10 @@ jobs:
           set -o pipefail
           LOG="$RUNNER_TEMP/tauri-tests.log"
           if ! cargo test --lib --no-fail-fast 2>&1 | tee "$LOG"; then
-            grep -nE -A2 '^test .* FAILED$|panicked at|^error(\[|:)|^\s+--> |^failures:' "$LOG" | head -80 | while IFS= read -r line; do
+            grep -nE -A2 '^test .* FAILED$|panicked at|^error(\[|:)|^\s+--> |^failures:|overflowed its stack|SIGSEGV|SIGABRT|signal: |process didn.t exit successfully|test result: FAILED' "$LOG" | head -80 | while IFS= read -r line; do
               echo "::error title=cargo test (tauri)::${line}"
             done
+            tail -n 40 "$LOG" | while IFS= read -r line; do echo "::warning title=cargo test tail::${line}"; done
             exit 1
           fi
 
