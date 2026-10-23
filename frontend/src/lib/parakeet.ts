@@ -65,6 +65,12 @@ export const MODEL_DISPLAY_CONFIG: Record<string, ModelDisplayInfo> = {
     tagline: 'Real time • Smaller size',
     tier: 'balanced'
   },
+  'ivrit-zipformer-66m-he': {
+    friendlyName: 'ivrit.ai Streaming (Hebrew)',
+    icon: '🗣️',
+    tagline: 'Streaming • Hebrew only • 69 MB, runs on any machine',
+    tier: 'fastest'
+  },
   'parakeet-tdt-0.6b-v3-fp32': {
     friendlyName: 'Precise',
     icon: '🎯',

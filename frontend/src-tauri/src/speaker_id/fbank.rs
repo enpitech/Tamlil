@@ -21,8 +21,13 @@ fn mel_scale(freq: f32) -> f32 {
 
 /// Triangular mel filterbank laid out over the FFT power bins (Kaldi style).
 fn mel_banks() -> Vec<Vec<(usize, f32)>> {
+    mel_banks_with(0.0)
+}
+
+/// `high_freq <= 0` means Nyquist + high_freq (Kaldi convention).
+fn mel_banks_with(high_freq: f32) -> Vec<Vec<(usize, f32)>> {
     let nyquist = SAMPLE_RATE as f32 / 2.0;
-    let high_freq = nyquist;
+    let high_freq = if high_freq <= 0.0 { nyquist + high_freq } else { high_freq };
     let num_fft_bins = FFT_SIZE / 2;
     let fft_bin_width = SAMPLE_RATE as f32 / FFT_SIZE as f32;
     let mel_low = mel_scale(LOW_FREQ);
@@ -52,17 +57,90 @@ fn mel_banks() -> Vec<Vec<(usize, f32)>> {
         .collect()
 }
 
+/// Kaldi window functions.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WindowType {
+    Hamming,
+    /// Kaldi's default: `(0.5 - 0.5 cos)^0.85`.
+    Povey,
+}
+
+/// Feature options. `speaker()` matches WeSpeaker (int16 scale, Hamming,
+/// snip_edges, CMN); `k2()` matches sherpa-onnx / icefall transducers (audio
+/// in [-1, 1], Povey window, no edge snipping, high_freq = Nyquist - 400 Hz, no CMN).
+#[derive(Debug, Clone, Copy)]
+pub struct FbankOptions {
+    pub window: WindowType,
+    /// `true`: frames fully inside the signal (Kaldi default); `false`: centred
+    /// frames with reflected padding, `round(len / shift)` frames.
+    pub snip_edges: bool,
+    /// Upper edge of the mel banks in Hz; `<= 0` means Nyquist + value.
+    pub high_freq: f32,
+    /// Multiplier applied to the samples before analysis.
+    pub scale: f32,
+    /// Subtract the per-utterance mean of every bin.
+    pub cmn: bool,
+}
+
+impl FbankOptions {
+    pub const fn speaker() -> Self {
+        Self { window: WindowType::Hamming, snip_edges: true, high_freq: 0.0, scale: 32768.0, cmn: true }
+    }
+
+    pub const fn k2() -> Self {
+        Self { window: WindowType::Povey, snip_edges: false, high_freq: -400.0, scale: 1.0, cmn: false }
+    }
+}
+
 /// Compute `[frames, 80]` mean-normalised log-mel features from 16 kHz mono
-/// audio in `[-1, 1]`. Returns `None` when the clip is too short for one frame.
+/// audio in `[-1, 1]` with the speaker-model settings. Returns `None` when the
+/// clip is too short for one frame.
 pub fn compute_fbank(audio: &[f32]) -> Option<Vec<[f32; NUM_MEL_BINS]>> {
+    compute_fbank_with(audio, FbankOptions::speaker())
+}
+
+fn window_fn(kind: WindowType) -> Vec<f32> {
+    (0..FRAME_LENGTH)
+        .map(|i| {
+            let a = 2.0 * std::f32::consts::PI * i as f32 / (FRAME_LENGTH as f32 - 1.0);
+            match kind {
+                WindowType::Hamming => 0.54 - 0.46 * a.cos(),
+                WindowType::Povey => (0.5 - 0.5 * a.cos()).powf(0.85),
+            }
+        })
+        .collect()
+}
+
+/// Kaldi `snip_edges = false`: frame `f` is centred at `(f + 0.5) * shift`;
+/// samples outside the signal are mirrored.
+fn frame_start_reflected(audio: &[f32], f: usize, frame: &mut [f32]) {
+    let centre = (f as i64 * FRAME_SHIFT as i64) + FRAME_SHIFT as i64 / 2;
+    let start = centre - FRAME_LENGTH as i64 / 2;
+    let n = audio.len() as i64;
+    for (i, v) in frame.iter_mut().enumerate() {
+        let mut idx = start + i as i64;
+        if idx < 0 {
+            idx = -idx - 1;
+        }
+        if idx >= n {
+            idx = 2 * n - idx - 1;
+        }
+        *v = audio[idx.clamp(0, n - 1) as usize];
+    }
+}
+
+/// Log-mel features with explicit options; see [`FbankOptions`].
+pub fn compute_fbank_with(audio: &[f32], opts: FbankOptions) -> Option<Vec<[f32; NUM_MEL_BINS]>> {
     if audio.len() < FRAME_LENGTH {
         return None;
     }
-    let num_frames = 1 + (audio.len() - FRAME_LENGTH) / FRAME_SHIFT;
-    let banks = mel_banks();
-    let window: Vec<f32> = (0..FRAME_LENGTH)
-        .map(|i| 0.54 - 0.46 * (2.0 * std::f32::consts::PI * i as f32 / (FRAME_LENGTH as f32 - 1.0)).cos())
-        .collect();
+    let num_frames = if opts.snip_edges {
+        1 + (audio.len() - FRAME_LENGTH) / FRAME_SHIFT
+    } else {
+        ((audio.len() as f32 / FRAME_SHIFT as f32) + 0.5).floor() as usize
+    };
+    let banks = mel_banks_with(opts.high_freq);
+    let window = window_fn(opts.window);
 
     let mut planner = RealFftPlanner::<f32>::new();
     let fft = planner.plan_fft_forward(FFT_SIZE);
@@ -74,10 +152,16 @@ pub fn compute_fbank(audio: &[f32]) -> Option<Vec<[f32; NUM_MEL_BINS]>> {
     let mut frame = vec![0f32; FRAME_LENGTH];
 
     for f in 0..num_frames {
-        let start = f * FRAME_SHIFT;
-        // Kaldi works on int16-scaled samples
-        for i in 0..FRAME_LENGTH {
-            frame[i] = audio[start + i] * 32768.0;
+        if opts.snip_edges {
+            let start = f * FRAME_SHIFT;
+            frame.copy_from_slice(&audio[start..start + FRAME_LENGTH]);
+        } else {
+            frame_start_reflected(audio, f, &mut frame);
+        }
+        if opts.scale != 1.0 {
+            for v in frame.iter_mut() {
+                *v *= opts.scale;
+            }
         }
         // remove DC offset
         let mean = frame.iter().sum::<f32>() / FRAME_LENGTH as f32;
@@ -107,6 +191,9 @@ pub fn compute_fbank(audio: &[f32]) -> Option<Vec<[f32; NUM_MEL_BINS]>> {
         features.push(feat);
     }
 
+    if !opts.cmn {
+        return Some(features);
+    }
     // Cepstral mean normalisation over the utterance
     let n = features.len() as f32;
     let mut mean = [0f32; NUM_MEL_BINS];
@@ -143,6 +230,16 @@ mod tests {
         assert!(mean0.abs() < 1e-3, "mean {}", mean0);
         // the tone's energy lands in a low bin: that bin should have a positive peak somewhere above others before CMN;
         // after CMN the features must still be finite
+        assert!(feats.iter().all(|f| f.iter().all(|v| v.is_finite())));
+    }
+
+    #[test]
+    fn k2_options_centre_frames_and_skip_cmn() {
+        let audio: Vec<f32> = (0..SAMPLE_RATE).map(|i| ((i * 7919) % 1000) as f32 / 1000.0 - 0.5).collect();
+        let feats = compute_fbank_with(&audio, FbankOptions::k2()).expect("features");
+        assert_eq!(feats.len(), SAMPLE_RATE / FRAME_SHIFT); // round(len / shift)
+        let mean0: f32 = feats.iter().map(|f| f[0]).sum::<f32>() / feats.len() as f32;
+        assert!(mean0.abs() > 1e-3, "no CMN expected");
         assert!(feats.iter().all(|f| f.iter().all(|v| v.is_finite())));
     }
 

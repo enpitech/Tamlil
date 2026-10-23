@@ -31,6 +31,8 @@ type MissingWhisper = Record<string, boolean>;
 interface ParakeetRawModel {
   name: string;
   status: unknown;
+  display_name?: string;
+  languages?: string[];
 }
 
 const GLOBAL = '__global__';
@@ -61,6 +63,7 @@ export function LanguageRoutesSettings() {
   const [saving, setSaving] = useState<string | null>(null);
   const [newLanguage, setNewLanguage] = useState('he');
   const [missingWhisper, setMissingWhisper] = useState<MissingWhisper>({});
+  const [missingParakeet, setMissingParakeet] = useState<MissingWhisper>({});
   const [downloading, setDownloading] = useState<Record<string, number>>({});
 
   const load = useCallback(async () => {
@@ -84,8 +87,8 @@ export function LanguageRoutesSettings() {
         ...parakeet.map((m) => ({
           provider: 'parakeet' as const,
           model: m.name,
-          label: `Parakeet: ${m.name}${m.status === 'Available' ? '' : ' (not downloaded)'}`,
-          languages: ['en'],
+          label: `${m.display_name && m.display_name !== m.name ? m.display_name : `Parakeet: ${m.name}`}${m.status === 'Available' ? '' : ' (not downloaded)'}`,
+          languages: m.languages && m.languages.length > 0 ? m.languages : ['en'],
         })),
       ];
       setSttOptions(stt);
@@ -94,6 +97,11 @@ export function LanguageRoutesSettings() {
         if (m.status !== 'Available') missing[m.name] = true;
       }
       setMissingWhisper(missing);
+      const missingP: MissingWhisper = {};
+      for (const m of parakeet) {
+        if (m.status !== 'Available') missingP[m.name] = true;
+      }
+      setMissingParakeet(missingP);
 
       setSummaryOptions(
         builtin.map((m) => ({
@@ -129,6 +137,9 @@ export function LanguageRoutesSettings() {
       });
       void load();
     });
+    const unlistenParakeet = listen<{ modelName: string; progress: number; status?: string }>('parakeet-model-download-progress', (e) => {
+      setDownloading((d) => (e.payload.modelName in d ? { ...d, [e.payload.modelName]: Math.round(e.payload.progress) } : d));
+    });
     const unlistenError = listen<{ modelName: string; error: string }>('model-download-error', (e) => {
       setDownloading((d) => {
         const next = { ...d };
@@ -140,9 +151,31 @@ export function LanguageRoutesSettings() {
     return () => {
       unlistenProgress.then((fn) => fn());
       unlistenDone.then((fn) => fn());
+      unlistenParakeet.then((fn) => fn());
       unlistenError.then((fn) => fn());
     };
   }, [load]);
+
+  const downloadParakeet = async (modelName: string) => {
+    setDownloading((d) => ({ ...d, [modelName]: 0 }));
+    try {
+      await invoke('parakeet_init');
+      await invoke('parakeet_download_model', { modelName });
+      setDownloading((d) => {
+        const next = { ...d };
+        delete next[modelName];
+        return next;
+      });
+      void load();
+    } catch (err) {
+      setDownloading((d) => {
+        const next = { ...d };
+        delete next[modelName];
+        return next;
+      });
+      toast.error('Model download failed', { description: err instanceof Error ? err.message : String(err) });
+    }
+  };
 
   const downloadWhisper = async (modelName: string) => {
     setDownloading((d) => ({ ...d, [modelName]: 0 }));
@@ -304,6 +337,27 @@ export function LanguageRoutesSettings() {
                       </option>
                     ))}
                   </select>
+                  {route.stt_provider === 'parakeet' && route.stt_model && missingParakeet[route.stt_model] && (
+                    <span className="flex items-center gap-2 pt-1">
+                      {route.stt_model in downloading ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />
+                          <span className="text-amber-700">Downloading… {downloading[route.stt_model]}%</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-amber-700">Model not downloaded; {languageName(route.language)} will fall back to the global model.</span>
+                          <button
+                            type="button"
+                            className="rounded border border-gray-300 bg-white px-2 py-0.5 text-xs font-medium text-gray-800 hover:bg-gray-50"
+                            onClick={() => downloadParakeet(route.stt_model as string)}
+                          >
+                            Download
+                          </button>
+                        </>
+                      )}
+                    </span>
+                  )}
                   {route.stt_provider === 'localWhisper' && route.stt_model && missingWhisper[route.stt_model] && (
                     <span className="flex items-center gap-2 pt-1">
                       {route.stt_model in downloading ? (

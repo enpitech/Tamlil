@@ -575,6 +575,22 @@ const IVRIT_WHISPER_MODELS: &[(&str, &str, &str, &str, u64, &str)] = &[
         2952,
         "Hebrew fine-tune of Whisper large-v3 by ivrit.ai. Highest Hebrew accuracy, slower than turbo.",
     ),
+    (
+        "ivrit-large-v3-turbo-q4",
+        "ivrit.ai Whisper Large v3 Turbo q4_0 (Hebrew, experimental)",
+        "ggml-ivrit-large-v3-turbo-q4_0.bin",
+        "https://huggingface.co/Aminadaven/kol-hebrew-whisper-models/resolve/7211fea96b99/ggml-q4_0/ggml-q4_0.bin",
+        452,
+        "Experimental: 4-bit quantisation of ivrit.ai large-v3-turbo (community conversion). A third of the size and faster on CPU, slightly lower accuracy.",
+    ),
+    (
+        "ivrit-whisper-v2-d4",
+        "ivrit.ai Whisper v2 d4 (Hebrew, experimental)",
+        "ggml-ivrit-v2-d4.bin",
+        "https://huggingface.co/ivrit-ai/whisper-v2-d4-ggml/resolve/main/ggml-ivrit-v2-d4.bin",
+        2951,
+        "Experimental: ivrit.ai's earlier Hebrew model on Whisper large-v2. Large and slow; kept for comparison.",
+    ),
 ];
 
 pub fn builtin_entries(kind: ModelKind) -> Vec<RegistryEntry> {

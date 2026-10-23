@@ -100,3 +100,19 @@ Other conclusions:
 - `pre_speech_pad` above ~500 ms panics inside silero-rs; keep 300 ms.
 - CI speed numbers are not Mac speed: a real Apple Silicon GPU runs the encoder
   many times faster. Run the suite locally on the target Mac for RTF.
+
+### ivrit.ai streaming Zipformer (66M) vs whisper turbo
+
+Same 10 FLEURS clips, reference decoder (sherpa-onnx) and the app's own
+engine agree to the word:
+
+| Model | WER | RTF (4-core CPU, no GPU) | Size |
+|---|---|---|---|
+| ivrit whisper large-v3-turbo, full window | 24.4% | 4-10 | 1.5 GB |
+| ivrit whisper large-v3-turbo, chunked context 768 | 26.2% | 1.5-2 | 1.5 GB |
+| **ivrit Zipformer2 66M int8 (shipped Hebrew default)** | 28.0% | **0.06** | 69 MB |
+
+Both models miss the same opening phrases on two clips, which points at the
+reference text rather than the models. The Zipformer's features are k2-style
+(`FbankOptions::k2()`: audio in [-1, 1], Povey window, no edge snipping,
+high_freq Nyquist-400 Hz); feeding it int16-scaled audio yields nothing.

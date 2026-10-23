@@ -35,7 +35,7 @@ export function SetupOverviewStep() {
     {
       number: 2,
       type: 'hebrew',
-      title: 'Download Hebrew Transcription (ivrit.ai)',
+      title: 'Download Hebrew Transcription (ivrit.ai streaming, 69 MB)',
     },
     {
       number: 3,

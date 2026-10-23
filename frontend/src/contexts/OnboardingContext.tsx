@@ -8,9 +8,9 @@ import { resolveOnboardingSummaryModelStatus } from '@/lib/onboarding-summary-mo
 import type { ParakeetDownloadProgressEvent } from '@/lib/parakeet';
 
 const PARAKEET_MODEL = 'parakeet-tdt-0.6b-v3-int8';
-/** Hebrew whisper model (ivrit.ai); the Hebrew language route points at it. */
-export const HEBREW_WHISPER_MODEL = 'ivrit-large-v3-turbo';
-export const HEBREW_WHISPER_MODEL_MB = 1549;
+/** Hebrew model (ivrit.ai streaming Zipformer, parakeet engine); the Hebrew language route points at it. */
+export const HEBREW_WHISPER_MODEL = 'ivrit-zipformer-66m-he';
+export const HEBREW_WHISPER_MODEL_MB = 69;
 /** Small general whisper model used only to identify the spoken language (ivrit cannot). */
 export const LANGUAGE_ID_MODEL = 'base';
 
@@ -152,8 +152,8 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
 
   const checkHebrewWhisperOnDisk = async (): Promise<boolean> => {
     try {
-      await invoke('whisper_init');
-      const models = await invoke<Array<{ name: string; status: unknown }>>('whisper_get_available_models');
+      await invoke('parakeet_init');
+      const models = await invoke<Array<{ name: string; status: unknown }>>('parakeet_get_available_models');
       const ready = models.some((m) => m.name === HEBREW_WHISPER_MODEL && m.status === 'Available');
       setHebrewWhisperDownloaded(ready);
       if (ready) setHebrewWhisperProgress(100);
@@ -165,17 +165,17 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
   };
 
   const requestHebrewWhisperDownload = async () => {
-    console.log('[OnboardingContext] Starting Hebrew whisper (ivrit.ai) download');
+    console.log('[OnboardingContext] Starting Hebrew (ivrit.ai streaming) download');
     setHebrewWhisperError(null);
     try {
-      await invoke('whisper_init');
-      await invoke('whisper_download_model', { modelName: HEBREW_WHISPER_MODEL });
+      await invoke('parakeet_init');
+      await invoke('parakeet_download_model', { modelName: HEBREW_WHISPER_MODEL });
       setHebrewWhisperDownloaded(true);
       setHebrewWhisperProgress(100);
-      // Language identification needs a general model; small, best effort
-      invoke('whisper_download_model', { modelName: LANGUAGE_ID_MODEL }).catch((e) =>
-        console.warn('[OnboardingContext] language-id model download failed:', e)
-      );
+      // Language identification needs a small general whisper model; best effort
+      invoke('whisper_init')
+        .then(() => invoke('whisper_download_model', { modelName: LANGUAGE_ID_MODEL }))
+        .catch((e) => console.warn('[OnboardingContext] language-id model download failed:', e));
     } catch (err) {
       const message = String(err);
       if (message.includes('already') && message.includes('progress')) return;
@@ -343,18 +343,19 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     };
   }, []);
 
-  // Listen to whisper (ivrit.ai) download progress
+  // Listen to the Hebrew model's download progress (parakeet engine events)
   useEffect(() => {
-    const unlistenProgress = listen<{ modelName: string; progress: number }>('model-download-progress', (event) => {
+    const unlistenProgress = listen<ParakeetDownloadProgressEvent>('parakeet-model-download-progress', (event) => {
       if (event.payload.modelName !== HEBREW_WHISPER_MODEL) return;
-      setHebrewWhisperProgress(event.payload.progress);
+      setHebrewWhisperProgress(Math.round(event.payload.progress));
+      if (event.payload.status === 'completed') setHebrewWhisperDownloaded(true);
     });
-    const unlistenComplete = listen<{ modelName: string }>('model-download-complete', (event) => {
+    const unlistenComplete = listen<{ modelName: string }>('parakeet-model-download-complete', (event) => {
       if (event.payload.modelName !== HEBREW_WHISPER_MODEL) return;
       setHebrewWhisperProgress(100);
       setHebrewWhisperDownloaded(true);
     });
-    const unlistenError = listen<{ modelName: string; error: string }>('model-download-error', (event) => {
+    const unlistenError = listen<{ modelName: string; error: string }>('parakeet-model-download-error', (event) => {
       if (event.payload.modelName !== HEBREW_WHISPER_MODEL) return;
       setHebrewWhisperError(event.payload.error);
     });

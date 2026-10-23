@@ -224,11 +224,17 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     const check = async () => {
       try {
         const routes = await invoke<Array<{ language: string; enabled: boolean; stt_provider: string | null; stt_model: string | null }>>('language_routes_list');
-        const wanted = routes.filter((r) => r.enabled && r.stt_provider === 'localWhisper' && r.stt_model);
+        const wanted = routes.filter((r) => r.enabled && (r.stt_provider === 'localWhisper' || r.stt_provider === 'parakeet') && r.stt_model);
         if (wanted.length === 0) return;
         await invoke('whisper_init');
         const models = await invoke<Array<{ name: string; status: unknown; languages?: string[] }>>('whisper_get_available_models');
-        const missing = wanted.filter((r) => !models.some((m) => m.name === r.stt_model && m.status === 'Available'));
+        await invoke('parakeet_init').catch(() => undefined);
+        const parakeetModels = await invoke<Array<{ name: string; status: unknown }>>('parakeet_get_available_models').catch(() => [] as Array<{ name: string; status: unknown }>);
+        const isReady = (r: { stt_provider: string | null; stt_model: string | null }) =>
+          r.stt_provider === 'parakeet'
+            ? parakeetModels.some((m) => m.name === r.stt_model && m.status === 'Available')
+            : models.some((m) => m.name === r.stt_model && m.status === 'Available');
+        const missing = wanted.filter((r) => !isReady(r));
         const hasGeneral = models.some((m) => m.status === 'Available' && (!m.languages || m.languages.length === 0));
         if (!hasGeneral && missing.length === 0 && !cancelled) {
           // Routed model present but nothing to identify languages with: fetch the small general model quietly
@@ -238,21 +244,24 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         for (const route of missing) {
           const modelName = route.stt_model as string;
           const toastId = `route-model-${modelName}`;
+          const downloadCommand = route.stt_provider === 'parakeet' ? 'parakeet_download_model' : 'whisper_download_model';
+          const progressEvent = route.stt_provider === 'parakeet' ? 'parakeet-model-download-progress' : 'model-download-progress';
+          const sizeLabel = route.stt_provider === 'parakeet' ? '69 MB' : modelName.includes('turbo') ? '1.5 GB' : 'about 3 GB';
           toast.warning(`${route.language === 'he' ? 'Hebrew' : route.language.toUpperCase()} transcription model not downloaded`, {
             id: toastId,
-            description: `${modelName} is needed to transcribe ${route.language === 'he' ? 'Hebrew' : route.language.toUpperCase()}. Download it now (${modelName.includes('turbo') ? '1.5 GB' : 'about 3 GB'})?`,
+            description: `${modelName} is needed to transcribe ${route.language === 'he' ? 'Hebrew' : route.language.toUpperCase()}. Download it now (${sizeLabel})?`,
             duration: 20000,
             action: {
               label: 'Download',
               onClick: () => {
                 toast.loading(`Downloading ${modelName}… 0%`, { id: toastId, duration: Infinity });
                 let unlistenProgress: (() => void) | undefined;
-                listen<{ modelName: string; progress: number }>('model-download-progress', (e) => {
+                listen<{ modelName: string; progress: number }>(progressEvent, (e) => {
                   if (e.payload.modelName === modelName) {
-                    toast.loading(`Downloading ${modelName}… ${e.payload.progress}%`, { id: toastId, duration: Infinity });
+                    toast.loading(`Downloading ${modelName}… ${Math.round(e.payload.progress)}%`, { id: toastId, duration: Infinity });
                   }
                 }).then((fn) => { unlistenProgress = fn; });
-                invoke('whisper_download_model', { modelName })
+                invoke(downloadCommand, { modelName })
                   .then(() => invoke('whisper_download_model', { modelName: 'base' }).catch(() => undefined))
                   .then(() => toast.success(`${modelName} is ready`, { id: toastId, duration: 5000 }))
                   .catch((err) => toast.error(`Download failed: ${err instanceof Error ? err.message : String(err)}`, { id: toastId, duration: 8000 }))

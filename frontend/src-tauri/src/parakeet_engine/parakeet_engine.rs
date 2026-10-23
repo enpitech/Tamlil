@@ -79,6 +79,24 @@ pub struct ModelInfo {
     pub speed: String,     // Performance description
     pub status: ModelStatus,
     pub description: String,
+    /// Human-readable name for the UI.
+    #[serde(default)]
+    pub display_name: String,
+    /// Language hints (`["he"]`); empty means multilingual / English.
+    #[serde(default)]
+    pub languages: Vec<String>,
+    /// Shown with an "experimental" badge in the UI.
+    #[serde(default)]
+    pub experimental: bool,
+}
+
+/// Which decoder drives a model directory in this engine.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ModelFamily {
+    /// NVIDIA Parakeet TDT (encoder + decoder_joint + nemo128 + vocab).
+    ParakeetTdt,
+    /// k2 Zipformer2 streaming transducer (encoder + decoder + joiner + tokens).
+    Zipformer,
 }
 
 #[derive(Clone, Copy)]
@@ -95,6 +113,10 @@ struct ModelSpec {
     description: &'static str,
     source_base_url: &'static str,
     artifacts: &'static [ArtifactSpec],
+    family: ModelFamily,
+    display_name: &'static str,
+    languages: &'static [&'static str],
+    experimental: bool,
 }
 
 impl ModelSpec {
@@ -117,6 +139,17 @@ const PARAKEET_V2_ARTIFACTS: &[ArtifactSpec] = &[
     ArtifactSpec { filename: "vocab.txt", exact_bytes: 9_384 },
 ];
 
+/// ivrit.ai streaming Zipformer2 (66M, int8), CC-BY-4.0. Mirror of
+/// thewh1teagle/zipformer2-66m-streaming-he; sherpa-onnx export.
+const IVRIT_ZIPFORMER_ARTIFACTS: &[ArtifactSpec] = &[
+    ArtifactSpec { filename: "encoder.int8.onnx", exact_bytes: 70_478_964 },
+    ArtifactSpec { filename: "decoder.int8.onnx", exact_bytes: 1_049_105 },
+    ArtifactSpec { filename: "joiner.int8.onnx", exact_bytes: 771_805 },
+    ArtifactSpec { filename: "tokens.txt", exact_bytes: 17_086 },
+];
+
+pub const IVRIT_ZIPFORMER_MODEL: &str = "ivrit-zipformer-66m-he";
+
 const PARAKEET_MODEL_SPECS: &[ModelSpec] = &[
     ModelSpec {
         name: "parakeet-tdt-0.6b-v3-int8",
@@ -126,6 +159,10 @@ const PARAKEET_MODEL_SPECS: &[ModelSpec] = &[
         description: "Real time on M4 Max, latest version with int8 quantization",
         source_base_url: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce",
         artifacts: PARAKEET_V3_ARTIFACTS,
+        family: ModelFamily::ParakeetTdt,
+        display_name: "Parakeet v3 (English + European)",
+        languages: &[],
+        experimental: false,
     },
     ModelSpec {
         name: "parakeet-tdt-0.6b-v2-int8",
@@ -135,8 +172,35 @@ const PARAKEET_MODEL_SPECS: &[ModelSpec] = &[
         description: "Previous version with int8 quantization, good balance of speed and accuracy",
         source_base_url: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/0bbb45a3365852604aef28b538a8f066f4ccaa85",
         artifacts: PARAKEET_V2_ARTIFACTS,
+        family: ModelFamily::ParakeetTdt,
+        display_name: "Parakeet v2 (English)",
+        languages: &["en"],
+        experimental: false,
+    },
+    ModelSpec {
+        name: IVRIT_ZIPFORMER_MODEL,
+        size_mb: 69,
+        quantization: QuantizationType::Int8,
+        speed: "Streaming, ~25x faster than whisper",
+        description: "ivrit.ai streaming Hebrew model (66M parameters, Zipformer2). Hebrew only; accuracy close to ivrit whisper turbo on read speech, a fraction of the compute.",
+        source_base_url: "https://huggingface.co/ivrit-ai/zipformer2-66m-streaming-he/resolve/ee769a2a13b887f91572eec349458bfb0fe79e7a/sherpa-onnx",
+        artifacts: IVRIT_ZIPFORMER_ARTIFACTS,
+        family: ModelFamily::Zipformer,
+        display_name: "ivrit.ai Streaming (Hebrew)",
+        languages: &["he"],
+        experimental: false,
     },
 ];
+
+/// Loaded decoder, by family.
+enum LoadedModel {
+    Parakeet(ParakeetModel),
+    Zipformer(super::zipformer::ZipformerModel),
+}
+
+fn family_of(model_name: &str) -> ModelFamily {
+    find_model_spec(model_name).map(|s| s.family).unwrap_or(ModelFamily::ParakeetTdt)
+}
 
 fn find_model_spec(model_name: &str) -> Option<&'static ModelSpec> {
     PARAKEET_MODEL_SPECS
@@ -262,7 +326,7 @@ impl From<std::io::Error> for ParakeetEngineError {
 
 pub struct ParakeetEngine {
     models_dir: PathBuf,
-    current_model: Arc<RwLock<Option<ParakeetModel>>>,
+    current_model: Arc<RwLock<Option<LoadedModel>>>,
     current_model_name: Arc<RwLock<Option<String>>>,
     model_lifecycle_lock: Mutex<()>,
     pub(crate) available_models: Arc<RwLock<HashMap<String, ModelInfo>>>,
@@ -366,6 +430,9 @@ impl ParakeetEngine {
 
                 models.push(ModelInfo {
                     name: spec.name.to_string(),
+                    display_name: spec.display_name.to_string(),
+                    languages: spec.languages.iter().map(|l| l.to_string()).collect(),
+                    experimental: spec.experimental,
                     path: model_path,
                     size_mb: spec.size_mb,
                     quantization: spec.quantization,
@@ -464,14 +531,21 @@ impl ParakeetEngine {
                 let model_lifecycle_test_hook = self.load_test_hook().await;
                 #[cfg(test)]
                 let runtime_handle = tokio::runtime::Handle::current();
+                let family = family_of(model_name);
                 let model = tokio::task::spawn_blocking(move || {
                     #[cfg(test)]
                     if let Some(hook) = model_lifecycle_test_hook {
                         hook.load_started.notify_one();
                         runtime_handle.block_on(hook.continue_load.notified());
                     }
-                    ParakeetModel::new(&model_path, quantized)
-                        .map_err(|error| error.to_string())
+                    match family {
+                        ModelFamily::ParakeetTdt => ParakeetModel::new(&model_path, quantized)
+                            .map(LoadedModel::Parakeet)
+                            .map_err(|error| error.to_string()),
+                        ModelFamily::Zipformer => super::zipformer::ZipformerModel::new(&model_path)
+                            .map(LoadedModel::Zipformer)
+                            .map_err(|error| error.to_string()),
+                    }
                 })
                 .await
                 .map_err(|error| {
@@ -554,13 +628,19 @@ impl ParakeetEngine {
         );
 
         // Transcribe using Parakeet model
-        let result = model
-            .transcribe_samples(audio_data)
-            .map_err(|e| anyhow!("Parakeet transcription failed: {}", e))?;
+        let text = match model {
+            LoadedModel::Parakeet(m) => m
+                .transcribe_samples(audio_data)
+                .map_err(|e| anyhow!("Parakeet transcription failed: {}", e))?
+                .text,
+            LoadedModel::Zipformer(m) => m
+                .transcribe(&audio_data)
+                .map_err(|e| anyhow!("Zipformer transcription failed: {}", e))?,
+        };
 
-        log::debug!("Parakeet transcription result: '{}'", result.text);
+        log::debug!("Transcription result: '{}'", text);
 
-        Ok(result.text)
+        Ok(text)
     }
 
     /// Get the models directory path
@@ -1358,6 +1438,9 @@ mod tests {
                 speed: "test".to_string(),
                 status: ModelStatus::Missing,
                 description: "test model".to_string(),
+                display_name: "test".to_string(),
+                languages: Vec::new(),
+                experimental: false,
             },
         );
         (temp_dir, engine, model_dir)

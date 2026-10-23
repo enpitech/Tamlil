@@ -484,3 +484,43 @@ async fn qa_dump_fbank() {
     fs::write(&out, format!("{{\"clip\": \"{}/{}\", \"frames\": {}, \"samples\": {}, \"first\": [{}]}}", clip.lang, clip.id, feats.len(), clip.audio.len(), rows.join(","))).unwrap();
     report(&format!("- Wrote fbank of {}/{} ({} frames) to `{}`", clip.lang, clip.id, feats.len(), out.display()));
 }
+
+/// ivrit.ai streaming Zipformer through the real engine path (ParakeetEngine):
+/// per-clip WER and RTF on the same Hebrew clips as the whisper tests.
+#[tokio::test]
+#[ignore]
+async fn qa_zipformer_per_clip() {
+    use app_lib::parakeet_engine::{ModelStatus as PStatus, ParakeetEngine, IVRIT_ZIPFORMER_MODEL};
+    let clips = load_clips();
+    let models = env_path("TAMLIL_QA_MODELS").expect("TAMLIL_QA_MODELS not set");
+    let engine = ParakeetEngine::new_with_models_dir(Some(models.clone())).expect("parakeet engine");
+    let discovered = engine.discover_models().await.expect("discover");
+    let info = discovered.iter().find(|m| m.name == IVRIT_ZIPFORMER_MODEL).expect("zipformer spec");
+    assert!(matches!(info.status, PStatus::Available), "{} status {:?} in {}", info.name, info.status, models.display());
+    let t = Instant::now();
+    engine.load_model(IVRIT_ZIPFORMER_MODEL).await.expect("load zipformer");
+    report(&format!("- Loaded `{}` in {:.1} s", IVRIT_ZIPFORMER_MODEL, t.elapsed().as_secs_f32()));
+
+    let mut rows = Vec::new();
+    let (mut total_errors, mut total_words, mut total_audio, mut total_time) = (0usize, 0usize, 0f32, 0f32);
+    for clip in clips.iter().filter(|c| c.lang == "he_il") {
+        let t = Instant::now();
+        let text = engine.transcribe_audio(clip.audio.clone()).await.unwrap_or_else(|e| format!("<error: {}>", e));
+        let secs = t.elapsed().as_secs_f32();
+        let (rate, errors, words) = wer(&clip.text, &text);
+        total_errors += errors;
+        total_words += words;
+        total_audio += clip.seconds;
+        total_time += secs;
+        rows.push(format!("| {} | {:.1} | {:.2} | {:.0}% | {} | {} |", clip.id, clip.seconds, secs / clip.seconds, rate * 100.0,
+            clip.text.replace('|', "/"), text.replace('|', "/")));
+    }
+    let overall = total_errors as f32 / total_words.max(1) as f32;
+    report(&format!(
+        "## ivrit.ai streaming Zipformer (66M int8) per clip\n\n\
+         Clips: {} · audio {:.0} s · compute {:.1} s · **RTF {:.3}** · **WER {:.1}%** ({} errors / {} words)\n\n\
+         | clip | s | RTF | WER | reference | recognised |\n|---|---|---|---|---|---|\n{}",
+        rows.len(), total_audio, total_time, total_time / total_audio.max(0.1), overall * 100.0, total_errors, total_words, rows.join("\n")
+    ));
+    assert!(overall < 0.5, "Zipformer WER {:.1}% is unusable", overall * 100.0);
+}

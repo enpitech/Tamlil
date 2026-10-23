@@ -24,8 +24,12 @@ use sqlx::SqlitePool;
 pub const SUMMARY_MODE_DIRECT: &str = "direct";
 pub const SUMMARY_MODE_TRANSLATE: &str = "translate";
 
-/// Hebrew whisper model (ivrit.ai) the default `he` route points at.
+/// Hebrew whisper model (ivrit.ai); the high-accuracy alternative for the `he` route.
 pub const HEBREW_WHISPER_MODEL: &str = "ivrit-large-v3-turbo";
+/// Default engine of the `he` route: ivrit.ai's streaming Zipformer (69 MB, ~25x
+/// cheaper than whisper turbo, close accuracy on read speech; see docs/QA.md).
+pub const HEBREW_DEFAULT_PROVIDER: &str = "parakeet";
+pub const HEBREW_DEFAULT_MODEL: &str = crate::parakeet_engine::IVRIT_ZIPFORMER_MODEL;
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, PartialEq, Eq)]
 pub struct LanguageRoute {
@@ -127,8 +131,8 @@ impl LanguageRouteRepository {
         Ok(count > 0)
     }
 
-    /// Default Hebrew route: ivrit.ai whisper for transcription, summaries written
-    /// directly in Hebrew by the global summary model. Seeded once, when no route
+    /// Default Hebrew route: ivrit.ai's streaming model for transcription, summaries
+    /// written directly in Hebrew by the global summary model. Seeded once, when no route
     /// exists yet (onboarding, or the first start of an installation that predates
     /// language routes). Returns true when a route was created.
     pub async fn seed_hebrew_default(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
@@ -142,8 +146,8 @@ impl LanguageRouteRepository {
             pool,
             LanguageRoute {
                 language: "he".to_string(),
-                stt_provider: Some("localWhisper".to_string()),
-                stt_model: Some(HEBREW_WHISPER_MODEL.to_string()),
+                stt_provider: Some(HEBREW_DEFAULT_PROVIDER.to_string()),
+                stt_model: Some(HEBREW_DEFAULT_MODEL.to_string()),
                 summary_provider: None,
                 summary_model: None,
                 summary_mode: SUMMARY_MODE_DIRECT.to_string(),

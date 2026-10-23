@@ -547,7 +547,7 @@ export function DownloadProgressStep() {
             HEBREW_CARD_TITLE,
             <Languages className="w-5 h-5 text-gray-600" />,
             hebrewState,
-            '~1.5 GB · ivrit.ai'
+            '~69 MB · ivrit.ai streaming'
           )}
 
           {renderDownloadCard(
