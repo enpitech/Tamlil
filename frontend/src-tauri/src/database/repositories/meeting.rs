@@ -82,8 +82,17 @@ impl MeetingsRepository {
 
             transaction.commit().await?;
 
-            // Convert Transcript to MeetingTranscript
-            let meeting_transcripts = transcripts
+            // Convert Transcript to MeetingTranscript; speaker avatars get a stable
+            // index from the order speakers first appear in the meeting
+            let mut ordered: Vec<&Transcript> = transcripts.iter().collect();
+            ordered.sort_by(|a, b| {
+                a.audio_start_time
+                    .unwrap_or(0.0)
+                    .partial_cmp(&b.audio_start_time.unwrap_or(0.0))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            let index_map = crate::api::api::speaker_index_map(ordered.iter().filter_map(|t| t.speaker.as_deref()));
+            let mut meeting_transcripts = transcripts
                 .into_iter()
                 .map(|t| MeetingTranscript {
                     id: t.id,
@@ -92,8 +101,11 @@ impl MeetingsRepository {
                     audio_start_time: t.audio_start_time,
                     audio_end_time: t.audio_end_time,
                     duration: t.duration,
+                    speaker: t.speaker,
+                    speaker_index: None,
                 })
                 .collect::<Vec<_>>();
+            crate::api::api::apply_speaker_indices(&mut meeting_transcripts, &index_map);
 
             Ok(Some(MeetingDetails {
                 id: meeting.id,
@@ -129,6 +141,19 @@ impl MeetingsRepository {
     }
 
     /// Get meeting transcripts with pagination support
+    /// Distinct speaker labels of a meeting in order of first appearance.
+    pub async fn speaker_order(pool: &SqlitePool, meeting_id: &str) -> Result<Vec<String>, SqlxError> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT speaker FROM transcripts \
+             WHERE meeting_id = ? AND speaker IS NOT NULL AND speaker != '' \
+             GROUP BY speaker ORDER BY MIN(COALESCE(audio_start_time, 0)), MIN(rowid)",
+        )
+        .bind(meeting_id)
+        .fetch_all(pool)
+        .await?;
+        Ok(rows.into_iter().map(|(s,)| s).collect())
+    }
+
     pub async fn get_meeting_transcripts_paginated(
         pool: &SqlitePool,
         meeting_id: &str,

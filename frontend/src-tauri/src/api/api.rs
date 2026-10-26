@@ -137,6 +137,39 @@ pub struct MeetingTranscript {
     pub audio_end_time: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration: Option<f64>,
+    /// Speaker label when speaker identification was on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<String>,
+    /// Stable index per meeting for the avatar: "You" is 0, other voices follow
+    /// in order of first appearance (derived; the live index is not persisted).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker_index: Option<u32>,
+}
+
+/// Avatar index per speaker label for a saved meeting: "You" → 0, every other
+/// label → 1, 2, ... in the order given (first appearance in the meeting).
+pub fn speaker_index_map<'a>(labels_in_order: impl IntoIterator<Item = &'a str>) -> std::collections::HashMap<String, u32> {
+    let mut map = std::collections::HashMap::new();
+    let mut next = 1u32;
+    for label in labels_in_order {
+        if label.is_empty() || map.contains_key(label) {
+            continue;
+        }
+        if label == "You" {
+            map.insert(label.to_string(), 0);
+        } else {
+            map.insert(label.to_string(), next);
+            next += 1;
+        }
+    }
+    map
+}
+
+/// Fill `speaker_index` on transcripts from a label → index map.
+pub fn apply_speaker_indices(transcripts: &mut [MeetingTranscript], map: &std::collections::HashMap<String, u32>) {
+    for t in transcripts.iter_mut() {
+        t.speaker_index = t.speaker.as_deref().and_then(|s| map.get(s).copied());
+    }
 }
 
 /// Meeting metadata without transcripts (for pagination)
@@ -888,8 +921,11 @@ pub async fn api_get_meeting_transcripts<R: Runtime>(
                 total_count
             );
 
-            // Convert Transcript to MeetingTranscript
-            let meeting_transcripts = transcripts
+            // Convert Transcript to MeetingTranscript (speaker indices are stable
+            // across pages: they come from the whole meeting's speaker order)
+            let order = MeetingsRepository::speaker_order(pool, &meeting_id).await.unwrap_or_default();
+            let index_map = speaker_index_map(order.iter().map(|s| s.as_str()));
+            let mut meeting_transcripts = transcripts
                 .into_iter()
                 .map(|t| MeetingTranscript {
                     id: t.id,
@@ -898,8 +934,11 @@ pub async fn api_get_meeting_transcripts<R: Runtime>(
                     audio_start_time: t.audio_start_time,
                     audio_end_time: t.audio_end_time,
                     duration: t.duration,
+                    speaker: t.speaker,
+                    speaker_index: None,
                 })
                 .collect::<Vec<_>>();
+            apply_speaker_indices(&mut meeting_transcripts, &index_map);
 
             let has_more = (offset + meeting_transcripts.len() as i64) < total_count;
 
@@ -1399,5 +1438,25 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
                 Err(format!("Connection failed: {}", e))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn speaker_indices_keep_you_first_and_follow_appearance() {
+        let map = speaker_index_map(["Speaker 1", "You", "Dana", "Speaker 1", ""]);
+        assert_eq!(map.get("You"), Some(&0));
+        assert_eq!(map.get("Speaker 1"), Some(&1));
+        assert_eq!(map.get("Dana"), Some(&2));
+        assert!(map.get("").is_none());
+        let mut ts = vec![MeetingTranscript {
+            id: "a".into(), text: "x".into(), timestamp: "t".into(), audio_start_time: None, audio_end_time: None,
+            duration: None, speaker: Some("Dana".into()), speaker_index: None,
+        }];
+        apply_speaker_indices(&mut ts, &map);
+        assert_eq!(ts[0].speaker_index, Some(2));
     }
 }
