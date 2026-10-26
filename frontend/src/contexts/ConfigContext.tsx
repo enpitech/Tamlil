@@ -234,12 +234,36 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
           r.stt_provider === 'parakeet'
             ? parakeetModels.some((m) => m.name === r.stt_model && m.status === 'Available')
             : models.some((m) => m.name === r.stt_model && m.status === 'Available');
-        const missing = wanted.filter((r) => !isReady(r));
+        let missing = wanted.filter((r) => !isReady(r));
+        // Installs seeded before the streaming model: the Hebrew route still points at
+        // the 1.5 GB whisper file. When that file was never downloaded, move the route
+        // to the streaming model (69 MB) instead of asking for the big download.
+        for (const r of missing) {
+          if (r.language === 'he' && r.stt_provider === 'localWhisper' && r.stt_model === 'ivrit-large-v3-turbo') {
+            try {
+              await invoke('language_routes_upsert', { route: { ...r, stt_provider: 'parakeet', stt_model: 'ivrit-zipformer-66m-he' } });
+              r.stt_provider = 'parakeet';
+              r.stt_model = 'ivrit-zipformer-66m-he';
+              console.log('[ConfigContext] Hebrew route moved to the streaming model');
+            } catch (e) {
+              console.warn('[ConfigContext] Could not migrate the Hebrew route:', e);
+            }
+          }
+        }
+        missing = missing.filter((r) => !isReady(r));
         const hasGeneral = models.some((m) => m.status === 'Available' && (!m.languages || m.languages.length === 0));
         if (!hasGeneral && missing.length === 0 && !cancelled) {
           // Routed model present but nothing to identify languages with: fetch the small general model quietly
           invoke('whisper_download_model', { modelName: 'base' }).catch(() => undefined);
         }
+        // Do not nag: a dismissed prompt stays quiet for a day
+        const now = Date.now();
+        missing = missing.filter((r) => {
+          try {
+            const until = Number(localStorage.getItem(`tamlil.routeModelPrompt.${r.stt_model}`) || 0);
+            return !(until > now);
+          } catch { return true; }
+        });
         if (cancelled || missing.length === 0) return;
         for (const route of missing) {
           const modelName = route.stt_model as string;
@@ -250,7 +274,13 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
           toast.warning(`${route.language === 'he' ? 'Hebrew' : route.language.toUpperCase()} transcription model not downloaded`, {
             id: toastId,
             description: `${modelName} is needed to transcribe ${route.language === 'he' ? 'Hebrew' : route.language.toUpperCase()}. Download it now (${sizeLabel})?`,
-            duration: 20000,
+            duration: 30000,
+            cancel: {
+              label: 'Not now',
+              onClick: () => {
+                try { localStorage.setItem(`tamlil.routeModelPrompt.${modelName}`, String(Date.now() + 24 * 3600 * 1000)); } catch { /* ignore */ }
+              },
+            },
             action: {
               label: 'Download',
               onClick: () => {

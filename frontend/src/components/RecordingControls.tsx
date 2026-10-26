@@ -14,6 +14,7 @@ import type { TranscriptionErrorPayload } from '@/services/transcriptService';
 import type { RoutedLanguageEvent } from '@/lib/language-routes';
 import { LANGUAGES } from '@/constants/languages';
 import { toast } from 'sonner';
+import { TranscriptionEngineBadge } from '@/components/TranscriptionEngineBadge';
 
 interface RecordingControlsProps {
   isRecording: boolean;
@@ -355,7 +356,8 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
 
   return (
     <TooltipProvider>
-      <div className="flex flex-col space-y-2">
+      <div className="flex flex-col items-center space-y-2">
+        <TranscriptionEngineBadge isRecording={isRecording} />
         <div className="flex items-center space-x-2 bg-white rounded-full shadow-lg px-4 py-2">
           {isProcessing && !isParentProcessing ? (
             <div className="flex items-center space-x-2">
