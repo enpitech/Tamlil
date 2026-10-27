@@ -249,17 +249,39 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
     };
   }, []);
 
+  // The parent passes fresh arrow functions on every render; keep the latest ones in refs so the
+  // Tauri listeners below are registered once per mount instead of torn down on each render.
+  const onRecordingStopRef = useRef(onRecordingStop);
+  const onTranscriptionErrorRef = useRef(onTranscriptionError);
+  useEffect(() => {
+    onRecordingStopRef.current = onRecordingStop;
+    onTranscriptionErrorRef.current = onTranscriptionError;
+  }, [onRecordingStop, onTranscriptionError]);
+
   useEffect(() => {
     console.log('Setting up recording event listeners');
-    let unsubscribes: (() => void)[] = [];
+    let cancelled = false;
+    const unsubscribes: (() => void)[] = [];
+
+    // Register a listener; if the effect was cleaned up while awaiting, unlisten immediately.
+    // Returns false when cancelled so setup can stop.
+    const register = async <T,>(eventName: string, handler: (event: { payload: T }) => void): Promise<boolean> => {
+      const unlisten = await listen<T>(eventName, handler);
+      if (cancelled) {
+        unlisten();
+        return false;
+      }
+      unsubscribes.push(unlisten);
+      return true;
+    };
 
     const setupListeners = async () => {
       try {
         // Transcript error listener - handles both regular and actionable errors
-        const transcriptErrorUnsubscribe = await listen('transcript-error', (event) => {
+        if (!(await register<string>('transcript-error', (event) => {
           console.log('transcript-error event received:', event);
           console.error('Transcription error received:', event.payload);
-          const errorMessage = event.payload as string;
+          const errorMessage = event.payload;
 
           Analytics.trackTranscriptionError(errorMessage);
           console.log('Tracked transcription error:', errorMessage);
@@ -270,15 +292,15 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
             return newCount;
           });
           setIsProcessing(false);
-          console.log('Calling onRecordingStop(false) due to transcript error');
-          onRecordingStop(false);
-          if (onTranscriptionError) {
-            onTranscriptionError(errorMessage);
+          console.log('Calling onRecordingStopRef.current(false) due to transcript error');
+          onRecordingStopRef.current(false);
+          if (onTranscriptionErrorRef.current) {
+            onTranscriptionErrorRef.current(errorMessage);
           }
-        });
+        }))) return;
 
         // Transcription error listener - handles structured error objects with actionable flag
-        const transcriptionErrorUnsubscribe = await listen<TranscriptionErrorPayload>('transcription-error', (event) => {
+        if (!(await register<TranscriptionErrorPayload>('transcription-error', (event) => {
           console.log('transcription-error event received:', event);
           console.error('Transcription error received:', event.payload);
 
@@ -295,47 +317,43 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
           setIsProcessing(false);
 
           if (event.payload.phase === 'active') {
-            console.log('Calling onRecordingStop(false) due to active transcription error');
-            onRecordingStop(false);
+            console.log('Calling onRecordingStopRef.current(false) due to active transcription error');
+            onRecordingStopRef.current(false);
           }
 
           // For actionable errors (like model loading failures), the main page will handle showing the model selector
           // For regular errors, they are handled by useModalState global listener which shows a toast
-        });
+        }))) return;
 
         // Pause/Resume events are now handled by RecordingStateContext
         // No need for duplicate listeners here
 
         // Speech detected listener - for UX feedback when VAD detects speech
-        const speechDetectedUnsubscribe = await listen('speech-detected', (event) => {
+        if (!(await register('speech-detected', (event) => {
           console.log('speech-detected event received:', event);
           setSpeechDetected(true);
-        });
+        }))) return;
 
         // Language routing: the backend identified the spoken language and (maybe) switched models
-        const languageRoutedUnsubscribe = await listen<RoutedLanguageEvent>('transcription-language-routed', (event) => {
+        if (!(await register<RoutedLanguageEvent>('transcription-language-routed', (event) => {
           const { language, provider, model, switched } = event.payload;
           const name = LANGUAGES.find((l) => l.code === language)?.name ?? language.toUpperCase();
           const engine = provider === 'parakeet' ? 'Parakeet' : 'Whisper';
           if (switched) {
             toast.info(`${name} detected`, {
+              id: 'language-routed',
               description: `Switched transcription to ${engine} ${model}`,
               duration: 5000,
             });
           } else {
             toast.info(`${name} detected`, {
+              id: 'language-routed',
               description: `Continuing with ${engine} ${model}`,
               duration: 3000,
             });
           }
-        });
+        }))) return;
 
-        unsubscribes = [
-          transcriptErrorUnsubscribe,
-          transcriptionErrorUnsubscribe,
-          speechDetectedUnsubscribe,
-          languageRoutedUnsubscribe
-        ];
         console.log('Recording event listeners set up successfully');
       } catch (error) {
         console.error('Failed to set up recording event listeners:', error);
@@ -346,18 +364,19 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
 
     return () => {
       console.log('Cleaning up recording event listeners');
+      cancelled = true;
       unsubscribes.forEach(unsubscribe => {
         if (unsubscribe && typeof unsubscribe === 'function') {
           unsubscribe();
         }
       });
+      unsubscribes.length = 0;
     };
-  }, [onRecordingStop, onTranscriptionError]);
+  }, []);
 
   return (
     <TooltipProvider>
-      <div className="flex flex-col items-center space-y-2">
-        <TranscriptionEngineBadge isRecording={isRecording} />
+      <div className="flex flex-col space-y-2">
         <div className="flex items-center space-x-2 bg-white rounded-full shadow-lg px-4 py-2">
           {isProcessing && !isParentProcessing ? (
             <div className="flex items-center space-x-2">
@@ -504,6 +523,9 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
               )}
             </>
           )}
+
+          <div className="w-px h-6 bg-gray-200 mx-1" />
+          <TranscriptionEngineBadge isRecording={isRecording} />
         </div>
 
         {/* Show validation status only */}

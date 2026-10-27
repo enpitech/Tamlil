@@ -12,7 +12,9 @@ import { getSummaryModelSizeLabel, getSummaryModelSizeMb } from '@/lib/onboardin
 import type { ParakeetDownloadProgressEvent } from '@/lib/parakeet';
 
 const PARAKEET_MODEL = 'parakeet-tdt-0.6b-v3-int8';
-const HEBREW_CARD_TITLE = 'Hebrew Transcription';
+const HEBREW_CARD_TITLE = 'Hebrew Engine (ivrit.ai streaming)';
+const PARAKEET_CARD_TITLE = 'English Engine (Parakeet)';
+const HEBREW_MODEL = 'ivrit-zipformer-66m-he';
 
 type DownloadStatus = 'waiting' | 'downloading' | 'completed' | 'cancelled' | 'error';
 
@@ -347,22 +349,16 @@ export function DownloadProgressStep() {
   const handleContinue = async () => {
     // Verify actual model availability (catches state drift)
     try {
-      await invoke('parakeet_init');
-      const actuallyAvailable = await invoke<boolean>('parakeet_has_available_models');
+      const models = await invoke<{ name: string; status: unknown }[]>('parakeet_get_available_models');
+      const hebrewAvailable = models.some(
+        (m) => m.name === HEBREW_MODEL && m.status === 'Available'
+      );
 
-      if (actuallyAvailable && !parakeetDownloaded) {
-        console.log('[DownloadProgressStep] Model available but state not updated');
-        setParakeetDownloaded(true);
-        setParakeetState((prev) => ({
-          ...prev,
-          status: 'completed',
-          progress: 100,
-        }));
-      } else if (
-        !actuallyAvailable &&
-        (parakeetState.status === 'error' || parakeetState.status === 'cancelled')
+      if (
+        !hebrewAvailable &&
+        (hebrewState.status === 'error' || hebrewState.status === 'cancelled')
       ) {
-        toast.error('Transcription engine required', {
+        toast.error('Hebrew engine required', {
           description: 'Please retry the download before continuing.',
         });
         return;
@@ -503,10 +499,10 @@ export function DownloadProgressStep() {
             {state.status === 'cancelled' ? 'Download cancelled' : 'Download Error'}
           </p>
           {state.error && <p className="text-xs text-red-500 mt-1">{state.error}</p>}
-          {(title === 'Transcription Engine' || title === 'Summary Engine' || title === HEBREW_CARD_TITLE) && (
+          {(title === PARAKEET_CARD_TITLE || title === 'Summary Engine' || title === HEBREW_CARD_TITLE) && (
             <button
               onClick={
-                title === 'Transcription Engine'
+                title === PARAKEET_CARD_TITLE
                   ? handleRetryDownload
                   : title === HEBREW_CARD_TITLE
                   ? handleRetryHebrewDownload
@@ -529,7 +525,7 @@ export function DownloadProgressStep() {
   return (
     <OnboardingContainer
       title="Getting things ready"
-      description="You can start using Tamlil after downloading the Transcription Engine. Hebrew meetings need the Hebrew engine as well; it keeps downloading in the background."
+      description="Tamlil is ready for Hebrew as soon as the Hebrew engine is in place; the English engine and the summary model keep downloading in the background."
       step={3}
       totalSteps={isMac ? 4 : 3}
     >
@@ -537,7 +533,7 @@ export function DownloadProgressStep() {
         {/* Download Cards */}
         <div className="w-full max-w-lg space-y-4">
           {renderDownloadCard(
-            'Transcription Engine',
+            PARAKEET_CARD_TITLE,
             <Mic className="w-5 h-5 text-gray-600" />,
             parakeetState,
             '~670 MB'
@@ -559,9 +555,9 @@ export function DownloadProgressStep() {
           )}
         </div>
 
-        {/* Info Message - Only show when Parakeet is downloaded */}
+        {/* Info Message - Only show when the Hebrew engine is downloaded */}
         <AnimatePresence>
-          {parakeetDownloaded && !summaryModelDownloaded && (
+          {hebrewWhisperDownloaded && !summaryModelDownloaded && (
             <motion.div
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -586,10 +582,10 @@ export function DownloadProgressStep() {
         <div className="w-full max-w-xs">
           <Button
             onClick={handleContinue}
-            disabled={!parakeetDownloaded || isCompleting}
+            disabled={!hebrewWhisperDownloaded || isCompleting}
             className="w-full h-11 bg-gray-900 hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {(isCompleting || !parakeetDownloaded) ? (
+            {(isCompleting || !hebrewWhisperDownloaded) ? (
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
             ) : (
               'Continue'

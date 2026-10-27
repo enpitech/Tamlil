@@ -126,7 +126,7 @@ mod onnx_runtime_tests {
 
 // Global language preference storage (default to "auto-translate" for automatic translation to English)
 static LANGUAGE_PREFERENCE: std::sync::LazyLock<StdMutex<String>> =
-    std::sync::LazyLock::new(|| StdMutex::new("auto-translate".to_string()));
+    std::sync::LazyLock::new(|| StdMutex::new("he".to_string())); // Hebrew first; the frontend syncs the saved preference at startup
 
 #[derive(Debug, Deserialize)]
 struct RecordingArgs {
@@ -602,9 +602,9 @@ pub fn run() {
                 let pool = state.db_manager.pool().clone();
                 tauri::async_runtime::spawn(async move {
                     match language_routing::LanguageRouteRepository::seed_hebrew_default(&pool).await {
-                        Ok(true) => log::info!("Seeded the default Hebrew language route"),
+                        Ok(true) => log::info!("Seeded the default language routes"),
                         Ok(false) => {}
-                        Err(e) => log::warn!("Could not seed the default Hebrew language route: {}", e),
+                        Err(e) => log::warn!("Could not seed the default language routes: {}", e),
                     }
                 });
             }

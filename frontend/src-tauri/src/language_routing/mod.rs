@@ -30,6 +30,8 @@ pub const HEBREW_WHISPER_MODEL: &str = "ivrit-large-v3-turbo";
 /// cheaper than whisper turbo, close accuracy on read speech; see docs/QA.md).
 pub const HEBREW_DEFAULT_PROVIDER: &str = "parakeet";
 pub const HEBREW_DEFAULT_MODEL: &str = crate::parakeet_engine::IVRIT_ZIPFORMER_MODEL;
+pub const ENGLISH_DEFAULT_PROVIDER: &str = "parakeet";
+pub const ENGLISH_DEFAULT_MODEL: &str = crate::config::DEFAULT_PARAKEET_MODEL;
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, PartialEq, Eq)]
 pub struct LanguageRoute {
@@ -131,31 +133,52 @@ impl LanguageRouteRepository {
         Ok(count > 0)
     }
 
-    /// Default Hebrew route: ivrit.ai's streaming model for transcription, summaries
-    /// written directly in Hebrew by the global summary model. Seeded once, when no route
-    /// exists yet (onboarding, or the first start of an installation that predates
-    /// language routes). Returns true when a route was created.
+    /// Default routes: Hebrew on ivrit.ai's streaming model with summaries written
+    /// directly in Hebrew, and English on Parakeet (the global default is Hebrew-only,
+    /// so an English recording needs its own route). The Hebrew route is seeded once,
+    /// when no route exists yet (onboarding, or the first start of an installation that
+    /// predates language routes); the English route is added whenever it is missing and
+    /// the user has not customised the table beyond the Hebrew default. Returns true
+    /// when a route was created.
     pub async fn seed_hebrew_default(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM language_routes")
-            .fetch_one(pool)
+        let languages: Vec<String> = sqlx::query_scalar("SELECT language FROM language_routes")
+            .fetch_all(pool)
             .await?;
-        if count > 0 {
-            return Ok(false);
+        let mut created = false;
+        if languages.is_empty() {
+            Self::upsert(
+                pool,
+                LanguageRoute {
+                    language: "he".to_string(),
+                    stt_provider: Some(HEBREW_DEFAULT_PROVIDER.to_string()),
+                    stt_model: Some(HEBREW_DEFAULT_MODEL.to_string()),
+                    summary_provider: None,
+                    summary_model: None,
+                    summary_mode: SUMMARY_MODE_DIRECT.to_string(),
+                    enabled: true,
+                },
+            )
+            .await?;
+            created = true;
         }
-        Self::upsert(
-            pool,
-            LanguageRoute {
-                language: "he".to_string(),
-                stt_provider: Some(HEBREW_DEFAULT_PROVIDER.to_string()),
-                stt_model: Some(HEBREW_DEFAULT_MODEL.to_string()),
-                summary_provider: None,
-                summary_model: None,
-                summary_mode: SUMMARY_MODE_DIRECT.to_string(),
-                enabled: true,
-            },
-        )
-        .await?;
-        Ok(true)
+        let untouched = languages.iter().all(|l| l == "he");
+        if untouched && !languages.iter().any(|l| l == "en") {
+            Self::upsert(
+                pool,
+                LanguageRoute {
+                    language: "en".to_string(),
+                    stt_provider: Some(ENGLISH_DEFAULT_PROVIDER.to_string()),
+                    stt_model: Some(ENGLISH_DEFAULT_MODEL.to_string()),
+                    summary_provider: None,
+                    summary_model: None,
+                    summary_mode: SUMMARY_MODE_DIRECT.to_string(),
+                    enabled: true,
+                },
+            )
+            .await?;
+            created = true;
+        }
+        Ok(created)
     }
 
     pub async fn upsert(pool: &SqlitePool, route: LanguageRoute) -> Result<LanguageRoute, sqlx::Error> {

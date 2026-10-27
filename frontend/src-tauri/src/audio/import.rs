@@ -3,7 +3,7 @@
 use crate::api::TranscriptSegment;
 use crate::audio::decoder::{decode_audio_file, decode_audio_file_with_progress};
 use crate::audio::vad::get_speech_chunks_with_progress;
-use crate::config::{DEFAULT_WHISPER_MODEL, DEFAULT_PARAKEET_MODEL};
+use crate::config::{DEFAULT_WHISPER_MODEL, DEFAULT_TRANSCRIPT_MODEL};
 use crate::parakeet_engine::ParakeetEngine;
 use crate::state::AppState;
 use crate::whisper_engine::WhisperEngine;
@@ -862,14 +862,14 @@ async fn get_configured_model<R: Runtime>(app: &AppHandle<R>, provider_type: &st
             } else {
                 // Return default model for the requested type
                 Ok(if provider_type == "parakeet" {
-                    DEFAULT_PARAKEET_MODEL.to_string()
+                    DEFAULT_TRANSCRIPT_MODEL.to_string()
                 } else {
                     DEFAULT_WHISPER_MODEL.to_string()
                 })
             }
         }
         None => Ok(if provider_type == "parakeet" {
-            DEFAULT_PARAKEET_MODEL.to_string()
+            DEFAULT_TRANSCRIPT_MODEL.to_string()
         } else {
             DEFAULT_WHISPER_MODEL.to_string()
         }),

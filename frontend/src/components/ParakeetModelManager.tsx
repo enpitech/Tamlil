@@ -397,10 +397,10 @@ export function ParakeetModelManager({
   }
 
   const recommendedModel = models.find(m =>
-    m.name === 'parakeet-tdt-0.6b-v3-int8'
+    m.name === 'ivrit-zipformer-66m-he'
   );
   const otherModels = models.filter(m =>
-    m.name !== 'parakeet-tdt-0.6b-v3-int8'
+    m.name !== 'ivrit-zipformer-66m-he'
   );
 
   return (

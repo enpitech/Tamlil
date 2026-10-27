@@ -9,6 +9,12 @@ import { useConfig } from '@/contexts/ConfigContext';
 import type { RoutedLanguageEvent } from '@/lib/language-routes';
 import { LANGUAGES } from '@/constants/languages';
 
+const QUICK_LANGUAGES = [
+  { code: 'he', name: 'Hebrew' },
+  { code: 'en', name: 'English' },
+  { code: 'auto', name: 'Auto detect' },
+];
+
 interface RawModel {
   name: string;
   status: unknown;
@@ -29,7 +35,7 @@ interface Option {
  * the language route switched to, and the switch is locked until the recording ends.
  */
 export function TranscriptionEngineBadge({ isRecording }: { isRecording: boolean }) {
-  const { transcriptModelConfig, setTranscriptModelConfig } = useConfig();
+  const { transcriptModelConfig, setTranscriptModelConfig, selectedLanguage, setSelectedLanguage } = useConfig();
   const [options, setOptions] = useState<Option[]>([]);
   const [routed, setRouted] = useState<RoutedLanguageEvent | null>(null);
   const [saving, setSaving] = useState(false);
@@ -61,9 +67,12 @@ export function TranscriptionEngineBadge({ isRecording }: { isRecording: boolean
   // What the route switched to during this recording
   useEffect(() => {
     if (!isRecording) { setRouted(null); return; }
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
-    listen<RoutedLanguageEvent>('transcription-language-routed', (e) => setRouted(e.payload)).then((fn) => { unlisten = fn; });
-    return () => { if (unlisten) unlisten(); };
+    listen<RoutedLanguageEvent>('transcription-language-routed', (e) => setRouted(e.payload)).then((fn) => {
+      if (cancelled) fn(); else unlisten = fn;
+    });
+    return () => { cancelled = true; if (unlisten) unlisten(); };
   }, [isRecording]);
 
   const currentKey = `${transcriptModelConfig.provider}:${transcriptModelConfig.model}`;
@@ -95,7 +104,7 @@ export function TranscriptionEngineBadge({ isRecording }: { isRecording: boolean
 
   if (!localOnly) {
     return (
-      <div className="flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1 text-xs text-gray-600 shadow">
+      <div className="flex items-center gap-1.5 text-xs text-gray-600 whitespace-nowrap">
         <Cpu className="h-3.5 w-3.5 text-gray-400" />
         <span>Transcription: {transcriptModelConfig.provider} · {transcriptModelConfig.model}</span>
       </div>
@@ -103,8 +112,23 @@ export function TranscriptionEngineBadge({ isRecording }: { isRecording: boolean
   }
 
   return (
-    <div className="flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1 text-xs text-gray-600 shadow" title={isRecording ? 'The model can be changed between recordings' : 'Applies to the next recording'}>
+    <div className="flex items-center gap-1.5 text-xs text-gray-600 whitespace-nowrap" title={isRecording ? 'The model can be changed between recordings' : 'Applies to the next recording'}>
       <Cpu className="h-3.5 w-3.5 text-gray-400" />
+      <select
+        aria-label="Transcription language"
+        className="cursor-pointer bg-transparent text-xs text-gray-800 focus:outline-none disabled:cursor-not-allowed disabled:text-gray-500"
+        value={QUICK_LANGUAGES.some((l) => l.code === selectedLanguage) ? selectedLanguage : ''}
+        disabled={isRecording}
+        onChange={(e) => setSelectedLanguage(e.target.value)}
+      >
+        {!QUICK_LANGUAGES.some((l) => l.code === selectedLanguage) && (
+          <option value="">{LANGUAGES.find((l) => l.code === selectedLanguage)?.name ?? selectedLanguage}</option>
+        )}
+        {QUICK_LANGUAGES.map((l) => (
+          <option key={l.code} value={l.code}>{l.name}</option>
+        ))}
+      </select>
+      <span className="text-gray-300" aria-hidden="true">·</span>
       {routedLabel ? (
         <span className="text-gray-800" dir="auto">{routedLabel}</span>
       ) : (
@@ -112,7 +136,7 @@ export function TranscriptionEngineBadge({ isRecording }: { isRecording: boolean
           <span className="text-gray-500">Model</span>
           <select
             aria-label="Transcription model"
-            className="max-w-[260px] cursor-pointer bg-transparent text-xs text-gray-800 focus:outline-none disabled:cursor-not-allowed disabled:text-gray-500"
+            className="max-w-[220px] truncate cursor-pointer bg-transparent text-xs text-gray-800 focus:outline-none disabled:cursor-not-allowed disabled:text-gray-500"
             value={current ? current.key : ''}
             disabled={isRecording || saving || options.length === 0}
             onChange={(e) => change(e.target.value)}

@@ -8,6 +8,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
+import { DEFAULT_TRANSCRIPT_MODEL, DEFAULT_TRANSCRIPT_PROVIDER } from '@/constants/modelDefaults';
 import { BetaFeatures, BetaFeatureKey, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
 import { readSpeakerIdPreference, readMicIsMePreference } from '@/components/SpeakerIdSettings';
 
@@ -113,8 +114,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
 
   // Transcript model configuration state
   const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
-    provider: 'parakeet',
-    model: 'parakeet-tdt-0.6b-v3-int8',
+    provider: DEFAULT_TRANSCRIPT_PROVIDER,
+    model: DEFAULT_TRANSCRIPT_MODEL,
     apiKey: null
   });
 
@@ -146,9 +147,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const [selectedLanguage, setSelectedLanguage] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('primaryLanguage');
-      return saved || 'auto';
+      return saved || 'he';
     }
-    return 'auto';
+    return 'he';
   });
 
   // UI preferences state
@@ -205,8 +206,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         if (config) {
           console.log('[ConfigContext] Loaded saved transcript config:', config);
           setTranscriptModelConfig({
-            provider: config.provider || 'parakeet',
-            model: config.model || 'parakeet-tdt-0.6b-v3-int8',
+            provider: config.provider || DEFAULT_TRANSCRIPT_PROVIDER,
+            model: config.model || DEFAULT_TRANSCRIPT_MODEL,
             apiKey: config.apiKey || null
           });
         }
@@ -241,9 +242,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         for (const r of missing) {
           if (r.language === 'he' && r.stt_provider === 'localWhisper' && r.stt_model === 'ivrit-large-v3-turbo') {
             try {
-              await invoke('language_routes_upsert', { route: { ...r, stt_provider: 'parakeet', stt_model: 'ivrit-zipformer-66m-he' } });
-              r.stt_provider = 'parakeet';
-              r.stt_model = 'ivrit-zipformer-66m-he';
+              await invoke('language_routes_upsert', { route: { ...r, stt_provider: DEFAULT_TRANSCRIPT_PROVIDER, stt_model: DEFAULT_TRANSCRIPT_MODEL } });
+              r.stt_provider = DEFAULT_TRANSCRIPT_PROVIDER;
+              r.stt_model = DEFAULT_TRANSCRIPT_MODEL;
               console.log('[ConfigContext] Hebrew route moved to the streaming model');
             } catch (e) {
               console.warn('[ConfigContext] Could not migrate the Hebrew route:', e);

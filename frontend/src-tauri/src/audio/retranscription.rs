@@ -4,7 +4,7 @@ use crate::audio::decoder::decode_audio_file;
 use crate::audio::vad::get_speech_chunks_with_progress;
 use super::common::{create_transcript_segments, split_segment_at_silence, write_transcripts_json};
 use super::constants::AUDIO_EXTENSIONS;
-use crate::config::{DEFAULT_WHISPER_MODEL, DEFAULT_PARAKEET_MODEL};
+use crate::config::{DEFAULT_WHISPER_MODEL, DEFAULT_TRANSCRIPT_MODEL};
 use crate::parakeet_engine::ParakeetEngine;
 use crate::state::AppState;
 use crate::whisper_engine::WhisperEngine;
@@ -710,13 +710,13 @@ async fn get_configured_parakeet_model<R: Runtime>(app: &AppHandle<R>) -> Result
             } else {
                 // Default to configured Parakeet model
                 warn!("Configured provider is not Parakeet, using default model");
-                Ok(DEFAULT_PARAKEET_MODEL.to_string())
+                Ok(DEFAULT_TRANSCRIPT_MODEL.to_string())
             }
         },
         None => {
             // Default to configured Parakeet model if no config exists
             warn!("No transcript config found, using default Parakeet model");
-            Ok(DEFAULT_PARAKEET_MODEL.to_string())
+            Ok(DEFAULT_TRANSCRIPT_MODEL.to_string())
         }
     }
 }

@@ -11,6 +11,12 @@ pub const DEFAULT_WHISPER_MODEL: &str = "large-v3-turbo";
 /// This is the quantized version optimized for speed.
 pub const DEFAULT_PARAKEET_MODEL: &str = "parakeet-tdt-0.6b-v3-int8";
 
+/// Hebrew-first default for the global transcription setting: ivrit.ai's
+/// streaming model (Parakeet engine, 69 MB). English stays available through
+/// Parakeet v3 and the language routes.
+pub const DEFAULT_TRANSCRIPT_PROVIDER: &str = "parakeet";
+pub const DEFAULT_TRANSCRIPT_MODEL: &str = "ivrit-zipformer-66m-he";
+
 /// Whisper model catalog with metadata for all supported models.
 /// Used by both WhisperEngine::discover_models() and discover_models_standalone().
 ///

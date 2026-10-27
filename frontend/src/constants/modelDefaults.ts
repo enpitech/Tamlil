@@ -16,6 +16,13 @@ export const DEFAULT_WHISPER_MODEL = 'large-v3-turbo';
 export const DEFAULT_PARAKEET_MODEL = 'parakeet-tdt-0.6b-v3-int8';
 
 /**
+ * Default transcription provider/model (Hebrew-first): the ivrit.ai streaming
+ * Zipformer model, served by the Parakeet engine. Used when nothing is configured.
+ */
+export const DEFAULT_TRANSCRIPT_PROVIDER = 'parakeet';
+export const DEFAULT_TRANSCRIPT_MODEL = 'ivrit-zipformer-66m-he';
+
+/**
  * Model defaults by provider type
  */
 export const MODEL_DEFAULTS = {

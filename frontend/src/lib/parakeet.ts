@@ -55,8 +55,7 @@ export const MODEL_DISPLAY_CONFIG: Record<string, ModelDisplayInfo> = {
   'parakeet-tdt-0.6b-v3-int8': {
     friendlyName: 'Lightning',
     icon: '⚡',
-    tagline: 'Real time • Best for speed, great accuracy',
-    recommended: true,
+    tagline: 'Real time • English and European languages',
     tier: 'fastest'
   },
   'parakeet-tdt-0.6b-v2-int8': {
@@ -68,7 +67,8 @@ export const MODEL_DISPLAY_CONFIG: Record<string, ModelDisplayInfo> = {
   'ivrit-zipformer-66m-he': {
     friendlyName: 'ivrit.ai Streaming (Hebrew)',
     icon: '🗣️',
-    tagline: 'Streaming • Hebrew only • 69 MB, runs on any machine',
+    tagline: 'Streaming • Hebrew • 69 MB, runs on any machine',
+    recommended: true,
     tier: 'fastest'
   },
   'parakeet-tdt-0.6b-v3-fp32': {

@@ -23,7 +23,11 @@ pub fn reset() {
     if let Ok(mut guard) = DETECTED_LANGUAGE.write() {
         *guard = None;
     }
+    ROUTED_EMITTED.store(false, std::sync::atomic::Ordering::SeqCst);
 }
+
+/// The routed-language event is announced at most once per recording.
+static ROUTED_EMITTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn set_detected(language: &str) {
     let code = normalise_language_code(language);
@@ -210,8 +214,8 @@ pub async fn routed_whisper_models<R: Runtime>(app: &AppHandle<R>) -> Vec<String
 
 fn default_transcript_config() -> TranscriptConfig {
     TranscriptConfig {
-        provider: "parakeet".to_string(),
-        model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
+        provider: crate::config::DEFAULT_TRANSCRIPT_PROVIDER.to_string(),
+        model: crate::config::DEFAULT_TRANSCRIPT_MODEL.to_string(),
         api_key: None,
     }
 }
@@ -269,6 +273,10 @@ pub struct RoutedLanguageEvent {
 }
 
 pub fn emit_routed<R: Runtime>(app: &AppHandle<R>, event: &RoutedLanguageEvent) {
+    if ROUTED_EMITTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        log::info!("🌐 Language already announced for this recording; not emitting again");
+        return;
+    }
     if let Err(e) = app.emit("transcription-language-routed", event) {
         log::warn!("Failed to emit transcription-language-routed: {}", e);
     }
