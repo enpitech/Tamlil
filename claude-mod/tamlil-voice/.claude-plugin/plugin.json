@@ -1,0 +1,50 @@
+{
+  "name": "tamlil-voice",
+  "version": "0.1.0",
+  "author": { "name": "Enpitech" },
+  "description": "Talk to Claude Code in Hebrew: /listen records your voice and transcribes it on your Mac with Tamlil's ivrit.ai whisper model.",
+  "userConfig": {
+    "language": {
+      "type": "string",
+      "title": "Language",
+      "description": "Spoken language passed to whisper (he for Hebrew, auto to detect).",
+      "default": "he"
+    },
+    "modelPath": {
+      "type": "string",
+      "title": "Model file",
+      "description": "Path to a whisper.cpp .bin model. Empty: the ivrit.ai model Tamlil downloaded.",
+      "default": ""
+    },
+    "autoSend": {
+      "type": "boolean",
+      "title": "Send at once",
+      "description": "Send the transcript as your prompt instead of leaving it in the box to check.",
+      "default": false
+    },
+    "speakReplies": {
+      "type": "boolean",
+      "title": "Read replies aloud",
+      "description": "Speak Claude's answer to a spoken prompt with the macOS voice below.",
+      "default": false
+    },
+    "voice": {
+      "type": "string",
+      "title": "Voice",
+      "description": "macOS voice for spoken replies (Carmit is the Hebrew one).",
+      "default": "Carmit"
+    },
+    "silenceSeconds": {
+      "type": "number",
+      "title": "Stop after silence (seconds)",
+      "description": "Recording stops by itself after this much silence; 0 records until /listen again.",
+      "default": 2
+    },
+    "maxSeconds": {
+      "type": "number",
+      "title": "Longest recording (seconds)",
+      "description": "Recording stops by itself after this long.",
+      "default": 120
+    }
+  }
+}

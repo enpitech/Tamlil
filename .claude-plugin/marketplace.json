@@ -1,0 +1,12 @@
+{
+  "name": "tamlil",
+  "owner": { "name": "Enpitech" },
+  "description": "Claude Code mods from Tamlil.",
+  "plugins": [
+    {
+      "name": "tamlil-voice",
+      "source": "./claude-mod/tamlil-voice",
+      "description": "Talk to Claude Code in Hebrew, transcribed on your Mac with Tamlil's ivrit.ai whisper model."
+    }
+  ]
+}
